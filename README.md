@@ -27,6 +27,7 @@ Paper 1.21+ 的僵尸 AI 强化插件。
 - `/za level info [player]`
 - `/za debug spawn`
 - `/za debug ai`
+- `/za debug system`
 - `/za debug reset`
 
 ## 关键配置
@@ -47,6 +48,7 @@ Paper 1.21+ 的僵尸 AI 强化插件。
 - `/za debug spawn`：显示生成拒绝原因分布（如 `global_cap/chunk_cooldown/budget`）。
 - `/za debug ai`：显示破防分工计数 `breachRoleP/S/B` 与临时方块数量。
 - `/za debug ai`：额外输出 `builderFailures` 与 `breakerRejects`，用于排查 build/break 卡点。
+- `/za debug system`：显示僵尸总量、临时方块总量、15 秒内即将到期数量与生成拒绝分布。
 - `/za debug reset`：清空 spawn/ai 调试统计，便于开始新一轮验收。
 
 ## 实机场景验收

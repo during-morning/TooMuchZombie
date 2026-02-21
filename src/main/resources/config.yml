@@ -49,6 +49,8 @@ zombie-ai:
     temporary-block-duration-ms: 120000
     temporary-block-decay-window-ms: 30000
     temporary-block-decay-particle-interval-ticks: 10
+    temporary-block-persistence-enabled: true
+    temporary-block-save-interval-ticks: 200
     place-particle-count: 16
     break-hit-effect-interval-ms: 180
     break-hit-particle-count: 8

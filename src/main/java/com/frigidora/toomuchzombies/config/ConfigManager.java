@@ -170,6 +170,14 @@ public class ConfigManager {
         return clampInt(config.getInt("zombie-ai.builder.temporary-block-decay-particle-interval-ticks", 10), 1, 40);
     }
 
+    public boolean isBuilderTemporaryBlockPersistenceEnabled() {
+        return config.getBoolean("zombie-ai.builder.temporary-block-persistence-enabled", true);
+    }
+
+    public int getBuilderTemporaryBlockSaveIntervalTicks() {
+        return clampInt(config.getInt("zombie-ai.builder.temporary-block-save-interval-ticks", 200), 20, 2400);
+    }
+
     public int getBuilderPlaceParticleCount() {
         return clampInt(config.getInt("zombie-ai.builder.place-particle-count", 16), 0, 128);
     }

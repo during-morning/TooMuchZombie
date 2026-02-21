@@ -43,6 +43,7 @@ public class TooMuchZombies extends JavaPlugin {
 
     @Override
     public void onDisable() {
+        com.frigidora.toomuchzombies.mechanics.TemporaryBlockManager.shutdown();
         if (com.frigidora.toomuchzombies.mechanics.BeaconManager.getInstance() != null) {
             com.frigidora.toomuchzombies.mechanics.BeaconManager.getInstance().saveBeacons();
         }

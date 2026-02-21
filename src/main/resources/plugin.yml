@@ -18,7 +18,7 @@ commands:
       - reload: 重新加载 config.yml 和 messages_*.yml
       - level set <玩家> <等级>: 设置玩家的危险等级
       - level info [玩家]: 查询自己或他人的危险等级
-      - debug <spawn|ai|reset>: 输出或重置生成/协作调试统计
+      - debug <spawn|ai|system|reset>: 输出或重置生成/协作调试统计
     permission: toomuchzombies.admin
     aliases: [tmz, toomuchzombies]
 permissions:

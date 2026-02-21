@@ -76,6 +76,7 @@ public class ZACommand implements CommandExecutor {
             case "reload":
                 ConfigManager.getInstance().reload();
                 LanguageManager.getInstance().reload();
+                ZombieFactory.loadConfig();
                 sender.sendMessage(lm.getMessage("config-reloaded"));
                 break;
             case "max":
@@ -107,6 +108,16 @@ public class ZACommand implements CommandExecutor {
         if ("spawn".equals(topic)) {
             sender.sendMessage(lm.getMessage("debug-spawn-title"));
             sender.sendMessage("§7rejects: §f" + ZombieFactory.getSpawnRejectStatsLine());
+            return;
+        }
+
+        if ("system".equals(topic)) {
+            int zombies = ZombieAIManager.getInstance().getZombieCount();
+            int tempBlocks = TemporaryBlockManager.getInstance() != null ? TemporaryBlockManager.getInstance().getTemporaryBlockCount() : 0;
+            int expiringSoon = TemporaryBlockManager.getInstance() != null ? TemporaryBlockManager.getInstance().getExpiringSoonCount(15000) : 0;
+            sender.sendMessage("§6=== System Debug ===");
+            sender.sendMessage("§7zombies: §f" + zombies + " §7tempBlocks: §f" + tempBlocks + " §7expiring<15s: §f" + expiringSoon);
+            sender.sendMessage("§7spawnRejects: §f" + ZombieFactory.getSpawnRejectStatsLine());
             return;
         }
 
