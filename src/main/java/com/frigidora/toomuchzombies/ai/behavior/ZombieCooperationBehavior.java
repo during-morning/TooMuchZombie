@@ -10,6 +10,7 @@ import org.bukkit.entity.Entity;
 import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Player;
 import org.bukkit.entity.Zombie;
+import org.bukkit.util.Vector;
 
 import com.frigidora.toomuchzombies.ai.ZombieAIManager;
 import com.frigidora.toomuchzombies.ai.ZombieAgent;
@@ -22,6 +23,7 @@ public class ZombieCooperationBehavior {
     private static final String RETREAT_REGROUP = "RETREAT_REGROUP";
     private static final String BREACH_SUPPORT = "BREACH_SUPPORT";
     private static final String FOCUS_FIRE = "FOCUS_FIRE";
+    private static final String ENCIRCLE_PRESSURE = "ENCIRCLE_PRESSURE";
     private static final String FLANK_SYNC = "FLANK_SYNC";
     private static final String BODYGUARD = "BODYGUARD";
 
@@ -31,6 +33,7 @@ public class ZombieCooperationBehavior {
     private UUID protectTargetUUID;
     private long lastScanTime;
     private long lastBreachSupport;
+    private long lastEncirclePlan;
 
     private LivingEntity focusTarget;
     private final Map<String, Integer> nodeHits = new ConcurrentHashMap<>();
@@ -56,6 +59,11 @@ public class ZombieCooperationBehavior {
 
         if (tryFocusFire()) {
             hit(FOCUS_FIRE);
+            return;
+        }
+
+        if (tryEncirclePressure()) {
+            hit(ENCIRCLE_PRESSURE);
             return;
         }
 
@@ -103,7 +111,10 @@ public class ZombieCooperationBehavior {
         }
         allies.add(zombie.getUniqueId());
         allies.sort(java.util.Comparator.comparing(UUID::toString));
-        return Math.max(0, allies.indexOf(zombie.getUniqueId()));
+        int base = Math.max(0, allies.indexOf(zombie.getUniqueId()));
+        int rotatingPhase = (int) ((System.currentTimeMillis() / 3500L) % 6L);
+        int roleBias = agent.getRole() == ZombieRole.ARCHER ? 2 : (agent.getRole() == ZombieRole.COMBAT ? 1 : 0);
+        return base + rotatingPhase + roleBias;
     }
 
     private boolean tryRetreatRegroup() {
@@ -150,6 +161,12 @@ public class ZombieCooperationBehavior {
             ZombieAIManager.getInstance().forceBreachRole(zombie.getUniqueId(), BreachAssignmentRole.SUPPORT);
         } else {
             ZombieAIManager.getInstance().assignBreachRole(zombie.getUniqueId(), breach);
+        }
+        double arriveRadius = ConfigManager.getInstance().getCoopBreachArriveRadius();
+        if (zombie.getLocation().distanceSquared(breach) <= arriveRadius * arriveRadius) {
+            ZombieAIManager.getInstance().fulfillBreachRequest(breach);
+        } else {
+            agent.moveTo(breach, 1.2);
         }
         lastBreachSupport = now;
         agent.getBuilderBehavior().setActive(true);
@@ -222,6 +239,44 @@ public class ZombieCooperationBehavior {
 
         agent.setFlanking(false);
         return false;
+    }
+
+    private boolean tryEncirclePressure() {
+        LivingEntity target = zombie.getTarget();
+        if (target == null || !target.isValid()) return false;
+
+        double range = ConfigManager.getInstance().getCoopEncircleRange();
+        int allies = 0;
+        int enemies = 1;
+        for (Entity e : zombie.getNearbyEntities(range, 10, range)) {
+            if (e instanceof Zombie) allies++;
+            else if (e instanceof Player || e instanceof org.bukkit.entity.IronGolem || e instanceof org.bukkit.entity.Wolf) enemies++;
+        }
+        if (allies < 3) return false;
+        if (System.currentTimeMillis() - lastEncirclePlan < ConfigManager.getInstance().getCoopEncircleReplanMs()) {
+            return false;
+        }
+        lastEncirclePlan = System.currentTimeMillis();
+
+        double pressure = allies / (double) Math.max(1, enemies);
+        if (pressure < 1.1) return false;
+
+        Vector toZombie = zombie.getLocation().toVector().subtract(target.getLocation().toVector()).setY(0);
+        if (toZombie.lengthSquared() < 0.01) {
+            toZombie = zombie.getLocation().getDirection().setY(0);
+        }
+        if (toZombie.lengthSquared() < 0.01) return false;
+        toZombie.normalize();
+
+        int hash = Math.abs(zombie.getUniqueId().hashCode());
+        int lane = hash % 3; // 0 left, 1 center, 2 right
+        double laneAngle = lane == 0 ? -0.95 : (lane == 2 ? 0.95 : 0.0);
+        double radius = 2.8 + Math.min(5.0, pressure * 1.2);
+        Vector slot = toZombie.clone().rotateAroundY(laneAngle).multiply(radius);
+        Location move = target.getLocation().clone().add(slot);
+        move.setY(zombie.getLocation().getY());
+        agent.moveTo(move, 1.2 + Math.min(0.25, pressure * 0.08));
+        return true;
     }
 
     private boolean tryBodyguard() {

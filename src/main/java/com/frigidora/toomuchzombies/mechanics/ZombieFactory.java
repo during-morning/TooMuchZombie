@@ -12,12 +12,16 @@ import java.util.concurrent.atomic.LongAdder;
 import org.bukkit.Chunk;
 import org.bukkit.Location;
 import org.bukkit.Material;
+import org.bukkit.NamespacedKey;
 import org.bukkit.attribute.Attribute;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.EntityType;
 import org.bukkit.entity.Player;
 import org.bukkit.entity.Zombie;
 import org.bukkit.inventory.ItemStack;
+import org.bukkit.persistence.PersistentDataType;
+import org.bukkit.potion.PotionEffect;
+import org.bukkit.potion.PotionEffectType;
 
 import com.frigidora.toomuchzombies.TooMuchZombies;
 import com.frigidora.toomuchzombies.ai.ZombieAIManager;
@@ -172,6 +176,7 @@ public class ZombieFactory {
     public static int calculateEncounterLevelNearby(Location loc) {
         int maxLevel = 1;
         double radius = ConfigManager.getInstance().getEncounterNearbyRadius();
+        int limit = ConfigManager.getInstance().getLevelMax();
 
         for (Player p : loc.getWorld().getPlayers()) {
             if (p.getLocation().distanceSquared(loc) <= radius * radius) {
@@ -179,7 +184,7 @@ public class ZombieFactory {
                 if (level > maxLevel) maxLevel = level;
             }
         }
-        return Math.max(1, Math.min(8, maxLevel));
+        return Math.max(1, Math.min(limit, maxLevel));
     }
 
     public static int calculateMaxLevelNearby(Zombie zombie) {
@@ -188,7 +193,6 @@ public class ZombieFactory {
 
     public static void assignRole(Zombie zombie) {
         int maxLevel = calculateMaxLevelNearby(zombie);
-        applyLevelAttributes(zombie, maxLevel);
 
         if (zombie.getAttribute(Attribute.GENERIC_FOLLOW_RANGE) != null) {
             zombie.getAttribute(Attribute.GENERIC_FOLLOW_RANGE).setBaseValue(100.0);
@@ -200,13 +204,14 @@ public class ZombieFactory {
 
     public static void assignRole(Zombie zombie, ZombieRole role) {
         int level = calculateMaxLevelNearby(zombie);
-        applyLevelAttributes(zombie, level);
         assignRole(zombie, role, level);
     }
 
     public static void assignRole(Zombie zombie, ZombieRole role, int level) {
         ZombieAIManager.getInstance().registerZombie(zombie, role, level);
         equipZombie(zombie, role);
+        storeZombieLevel(zombie, level);
+        applyLevelAttributes(zombie, level);
         zombie.setCustomName(role.name() + " (Lv." + level + ")");
         zombie.setCustomNameVisible(true);
 
@@ -409,68 +414,76 @@ public class ZombieFactory {
     }
 
     public static void applyLevelAttributes(Zombie zombie, int level) {
-        double health = 20.0;
-        switch (level) {
-            case 1:
-                health = 20.0;
-                break;
-            case 2:
-                health = 30.0;
-                break;
-            case 3:
-                health = 40.0;
-                break;
-            case 4:
-                health = 50.0;
-                break;
-            case 5:
-                health = 70.0;
-                break;
-            case 6:
-                health = 90.0;
-                break;
-            case 7:
-                health = 200.0;
-                break;
-            case 8:
-                health = 300.0;
-                break;
-            case 9:
-                health = 500.0 + RANDOM.nextDouble() * 524.0;
-                break;
-            case 10:
-                health = 700.0 + RANDOM.nextDouble() * 324.0;
-                zombie.addPotionEffect(new org.bukkit.potion.PotionEffect(org.bukkit.potion.PotionEffectType.REGENERATION, Integer.MAX_VALUE, 0));
-                break;
-            case 11:
-                health = 700.0 + RANDOM.nextDouble() * 324.0;
-                zombie.addPotionEffect(new org.bukkit.potion.PotionEffect(org.bukkit.potion.PotionEffectType.REGENERATION, Integer.MAX_VALUE, 2));
-                zombie.addPotionEffect(new org.bukkit.potion.PotionEffect(org.bukkit.potion.PotionEffectType.RESISTANCE, Integer.MAX_VALUE, 0));
-                break;
-            case 12:
-                health = 700.0 + RANDOM.nextDouble() * 324.0;
-                zombie.addPotionEffect(new org.bukkit.potion.PotionEffect(org.bukkit.potion.PotionEffectType.REGENERATION, Integer.MAX_VALUE, 5));
-                zombie.addPotionEffect(new org.bukkit.potion.PotionEffect(org.bukkit.potion.PotionEffectType.RESISTANCE, Integer.MAX_VALUE, 1));
-                break;
-            default:
-                break;
-        }
+        int maxLevel = ConfigManager.getInstance().getLevelMax();
+        int lv = Math.max(1, Math.min(maxLevel, level));
+        double t = (lv - 1.0) / Math.max(1.0, maxLevel - 1.0);
 
-        if (level >= 9) {
-            zombie.setGlowing(true);
-        }
-
-        if (level <= 8) {
-            health = health * (0.8 + RANDOM.nextDouble() * 0.4);
-        }
-
-        if (health > 1024.0) {
-            health = 1024.0;
+        double health = 20.0 + Math.pow(t, 1.25) * 900.0;
+        if (lv <= 4) {
+            health *= (0.85 + RANDOM.nextDouble() * 0.30);
         }
 
         if (zombie.getAttribute(Attribute.GENERIC_MAX_HEALTH) != null) {
-            zombie.getAttribute(Attribute.GENERIC_MAX_HEALTH).setBaseValue(health);
-            zombie.setHealth(health);
+            zombie.getAttribute(Attribute.GENERIC_MAX_HEALTH).setBaseValue(Math.min(1024.0, health));
+            zombie.setHealth(Math.min(zombie.getAttribute(Attribute.GENERIC_MAX_HEALTH).getValue(), Math.min(1024.0, health)));
         }
+
+        if (zombie.getAttribute(Attribute.GENERIC_ATTACK_DAMAGE) != null) {
+            zombie.getAttribute(Attribute.GENERIC_ATTACK_DAMAGE).setBaseValue(3.0 + t * 12.0);
+        }
+        if (zombie.getAttribute(Attribute.GENERIC_MOVEMENT_SPEED) != null) {
+            zombie.getAttribute(Attribute.GENERIC_MOVEMENT_SPEED).setBaseValue(0.23 + t * 0.12);
+        }
+        if (zombie.getAttribute(Attribute.GENERIC_ARMOR) != null) {
+            zombie.getAttribute(Attribute.GENERIC_ARMOR).setBaseValue(1.0 + t * 14.0);
+        }
+        if (zombie.getAttribute(Attribute.GENERIC_ARMOR_TOUGHNESS) != null) {
+            zombie.getAttribute(Attribute.GENERIC_ARMOR_TOUGHNESS).setBaseValue(t * 8.0);
+        }
+        if (zombie.getAttribute(Attribute.GENERIC_KNOCKBACK_RESISTANCE) != null) {
+            zombie.getAttribute(Attribute.GENERIC_KNOCKBACK_RESISTANCE).setBaseValue(Math.min(1.0, t * 0.95));
+        }
+        if (zombie.getAttribute(Attribute.GENERIC_FOLLOW_RANGE) != null) {
+            zombie.getAttribute(Attribute.GENERIC_FOLLOW_RANGE).setBaseValue(40.0 + t * 80.0);
+        }
+
+        applyLevelSkills(zombie, lv);
+        zombie.setGlowing(lv >= Math.max(9, maxLevel - 3));
+    }
+
+    private static void applyLevelSkills(Zombie zombie, int level) {
+        clearScalingEffects(zombie);
+        if (level >= 4) {
+            zombie.addPotionEffect(new PotionEffect(PotionEffectType.STRENGTH, Integer.MAX_VALUE, 0, true, false, false));
+        }
+        if (level >= 6) {
+            zombie.addPotionEffect(new PotionEffect(PotionEffectType.SPEED, Integer.MAX_VALUE, 0, true, false, false));
+        }
+        if (level >= 8) {
+            zombie.addPotionEffect(new PotionEffect(PotionEffectType.RESISTANCE, Integer.MAX_VALUE, 0, true, false, false));
+        }
+        if (level >= 10) {
+            zombie.addPotionEffect(new PotionEffect(PotionEffectType.REGENERATION, Integer.MAX_VALUE, 0, true, false, false));
+        }
+        if (level >= 11) {
+            zombie.addPotionEffect(new PotionEffect(PotionEffectType.FIRE_RESISTANCE, Integer.MAX_VALUE, 0, true, false, false));
+        }
+        if (level >= 12) {
+            zombie.addPotionEffect(new PotionEffect(PotionEffectType.REGENERATION, Integer.MAX_VALUE, 1, true, false, false));
+            zombie.addPotionEffect(new PotionEffect(PotionEffectType.RESISTANCE, Integer.MAX_VALUE, 1, true, false, false));
+        }
+    }
+
+    private static void clearScalingEffects(Zombie zombie) {
+        zombie.removePotionEffect(PotionEffectType.STRENGTH);
+        zombie.removePotionEffect(PotionEffectType.SPEED);
+        zombie.removePotionEffect(PotionEffectType.RESISTANCE);
+        zombie.removePotionEffect(PotionEffectType.REGENERATION);
+        zombie.removePotionEffect(PotionEffectType.FIRE_RESISTANCE);
+    }
+
+    private static void storeZombieLevel(Zombie zombie, int level) {
+        NamespacedKey key = new NamespacedKey(TooMuchZombies.getInstance(), "zombie_level");
+        zombie.getPersistentDataContainer().set(key, PersistentDataType.INTEGER, level);
     }
 }

@@ -295,6 +295,28 @@ public class ZombieAIManager implements Listener {
         return out;
     }
 
+    public Map<String, Integer> getBuilderFailureStats() {
+        Map<String, Integer> out = new java.util.HashMap<>();
+        for (ZombieAgent agent : agents.values()) {
+            Map<String, Integer> one = agent.getBuilderBehavior().getFailureCountersSnapshot();
+            for (Map.Entry<String, Integer> e : one.entrySet()) {
+                out.merge(e.getKey(), e.getValue(), Integer::sum);
+            }
+        }
+        return out;
+    }
+
+    public Map<String, Integer> getBreakerRejectStats() {
+        Map<String, Integer> out = new java.util.HashMap<>();
+        for (ZombieAgent agent : agents.values()) {
+            Map<String, Integer> one = agent.getBreakerBehavior().getRejectCountersSnapshot();
+            for (Map.Entry<String, Integer> e : one.entrySet()) {
+                out.merge(e.getKey(), e.getValue(), Integer::sum);
+            }
+        }
+        return out;
+    }
+
     public void resetDebugStats() {
         breachRoles.clear();
         breachRoleLeaseUntil.clear();
@@ -302,6 +324,8 @@ public class ZombieAIManager implements Listener {
         arbitrationHitStats.clear();
         for (ZombieAgent agent : agents.values()) {
             agent.getCooperationBehavior().resetNodeHitCounters();
+            agent.getBuilderBehavior().resetFailureCounters();
+            agent.getBreakerBehavior().resetRejectCounters();
         }
     }
     

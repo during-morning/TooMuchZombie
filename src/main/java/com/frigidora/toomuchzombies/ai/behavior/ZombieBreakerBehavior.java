@@ -27,6 +27,7 @@ public class ZombieBreakerBehavior {
     private java.util.Set<Material> breakerBlacklist = java.util.Collections.emptySet();
     private java.util.Set<Material> breakerWhitelist = java.util.Collections.emptySet();
     private long lastRuleRefreshTime = 0;
+    private final java.util.Map<String, Integer> rejectCounters = new java.util.concurrent.ConcurrentHashMap<>();
 
     public ZombieBreakerBehavior(ZombieAgent agent) {
         this.agent = agent;
@@ -36,7 +37,10 @@ public class ZombieBreakerBehavior {
     public void startBreaking(Block block) {
         if (currentTarget != null && currentTarget.equals(block)) return;
         refreshBreakRulesIfNeeded();
-        if (!isBreakAllowed(block)) return;
+        if (!isBreakAllowed(block)) {
+            hitReject("policy_blocked");
+            return;
+        }
         
         // 如果之前在挖别的，先注销
         if (currentTarget != null) {
@@ -70,35 +74,46 @@ public class ZombieBreakerBehavior {
         return currentTarget != null;
     }
 
+    public boolean canBreak(Block block) {
+        if (block == null) return false;
+        refreshBreakRulesIfNeeded();
+        return isBreakAllowed(block);
+    }
+
     public void tick() {
         if (currentTarget == null) return;
         refreshBreakRulesIfNeeded();
 
         if (agent.getRole() != com.frigidora.toomuchzombies.enums.ZombieRole.BUILDER &&
             agent.getRole() != com.frigidora.toomuchzombies.enums.ZombieRole.MINER) {
+            hitReject("role_forbidden");
             stopBreaking();
             return;
         }
         
         // Validation
         if (currentTarget.getType() == Material.AIR || currentTarget.getType() == Material.BEDROCK) {
+            hitReject("invalid_target");
             stopBreaking();
             return;
         }
 
         if (!isBreakAllowed(currentTarget)) {
+            hitReject("policy_blocked");
             stopBreaking();
             return;
         }
 
         // 信标保护检查：禁止在活跃信标 50 格内破坏方块
         if (com.frigidora.toomuchzombies.mechanics.BeaconManager.getInstance().isNearActiveBeacon(currentTarget.getLocation(), 50.0)) {
+            hitReject("beacon_protected");
             stopBreaking();
             return;
         }
         
         // 距离检查：缩小到 2.5 格 (距离平方 6.25)
         if (!zombie.getWorld().equals(currentTarget.getWorld()) || zombie.getLocation().distanceSquared(currentTarget.getLocation().add(0.5, 0.5, 0.5)) > 6.25) { 
+            hitReject("out_of_range");
             stopBreaking();
             return;
         }
@@ -194,18 +209,16 @@ public class ZombieBreakerBehavior {
         // 等级速度加成
         float levelMultiplier = 1.0f;
         int level = agent.getLevel();
-        if (level >= 9) {
-            levelMultiplier = 2.0f; // 挖掘速度增加100% (2x)
-        } else if (level == 10) {
-            // 虽然 9+ 已经包含 10，但这里按要求处理
-            levelMultiplier = 1.5f; // 挖掘速度增加50% (1.5x)
-        } else if (level == 11) {
-            levelMultiplier = 2.0f; // 挖掘速度增加100% (2x)
-        }
-        
-        // 9+ 的建造挖掘速度增加300% (4x) 优先
-        if (level >= 9) {
+        if (level >= 12) {
+            levelMultiplier = 4.5f;
+        } else if (level >= 10) {
             levelMultiplier = 4.0f;
+        } else if (level >= 8) {
+            levelMultiplier = 3.2f;
+        } else if (level >= 6) {
+            levelMultiplier = 2.4f;
+        } else if (level >= 4) {
+            levelMultiplier = 1.7f;
         }
 
         float finalSpeed = damage * (float) configMultiplier * levelMultiplier;
@@ -298,5 +311,17 @@ public class ZombieBreakerBehavior {
             return false;
         }
         return true;
+    }
+
+    public java.util.Map<String, Integer> getRejectCountersSnapshot() {
+        return java.util.Collections.unmodifiableMap(new java.util.HashMap<>(rejectCounters));
+    }
+
+    public void resetRejectCounters() {
+        rejectCounters.clear();
+    }
+
+    private void hitReject(String reason) {
+        rejectCounters.merge(reason, 1, Integer::sum);
     }
 }

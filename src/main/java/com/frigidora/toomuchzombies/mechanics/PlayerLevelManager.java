@@ -24,6 +24,8 @@ public class PlayerLevelManager {
     private final Map<UUID, Integer> levelOverrides = new ConcurrentHashMap<>();
     private final Map<UUID, double[]> stats = new ConcurrentHashMap<>();
     private final Map<UUID, Double> smoothedThreat = new ConcurrentHashMap<>();
+    private final Map<UUID, Integer> levelCache = new ConcurrentHashMap<>();
+    private final Map<UUID, Long> levelCacheTime = new ConcurrentHashMap<>();
 
     private PlayerLevelManager() {
         loadStats();
@@ -39,12 +41,15 @@ public class PlayerLevelManager {
 
     public void setLevelOverride(Player player, int level) {
         if (player == null) return;
-        levelOverrides.put(player.getUniqueId(), Math.max(1, Math.min(8, level)));
+        int maxLevel = ConfigManager.getInstance().getLevelMax();
+        levelOverrides.put(player.getUniqueId(), Math.max(1, Math.min(maxLevel, level)));
+        invalidateLevelCache(player.getUniqueId());
     }
 
     public void clearLevelOverride(Player player) {
         if (player == null) return;
         levelOverrides.remove(player.getUniqueId());
+        invalidateLevelCache(player.getUniqueId());
     }
 
     public void recordDamage(Player player, double damage) {
@@ -54,6 +59,7 @@ public class PlayerLevelManager {
             s[0] += damage;
             return s;
         });
+        invalidateLevelCache(player.getUniqueId());
         saveStatsAsync();
     }
 
@@ -64,6 +70,7 @@ public class PlayerLevelManager {
             s[1] += 1;
             return s;
         });
+        invalidateLevelCache(player.getUniqueId());
         applyHealthStats(player);
         saveStatsAsync();
     }
@@ -75,6 +82,7 @@ public class PlayerLevelManager {
             s[2] += 1;
             return s;
         });
+        invalidateLevelCache(player.getUniqueId());
         applyHealthStats(player);
         saveStatsAsync();
     }
@@ -157,35 +165,70 @@ public class PlayerLevelManager {
         ConfigManager cfg = ConfigManager.getInstance();
 
         double nearbyMax = self;
+        double nearbySum = self;
+        int nearbyCount = 1;
         double radius = cfg.getEncounterNearbyRadius();
         for (org.bukkit.entity.Entity e : player.getNearbyEntities(radius, radius, radius)) {
             if (e instanceof Player) {
-                nearbyMax = Math.max(nearbyMax, getPlayerLevel((Player) e));
+                int other = getPlayerLevel((Player) e);
+                nearbyMax = Math.max(nearbyMax, other);
+                nearbySum += other;
+                nearbyCount++;
             }
         }
 
-        double score = self * cfg.getEncounterSelfWeight() + nearbyMax * cfg.getEncounterNearbyMaxWeight();
+        double nearbyAvg = nearbySum / Math.max(1, nearbyCount);
+        double wSelf = cfg.getEncounterSelfWeight();
+        double wMax = cfg.getEncounterNearbyMaxWeight();
+        double wAvg = cfg.getEncounterNearbyAvgWeight();
+        double weightSum = Math.max(0.0001, wSelf + wMax + wAvg);
+        double score = (self * wSelf + nearbyMax * wMax + nearbyAvg * wAvg) / weightSum;
         int rounded = (int) Math.round(score);
-        return Math.max(1, Math.min(8, rounded));
+        int maxLevel = cfg.getLevelMax();
+        return Math.max(1, Math.min(maxLevel, rounded));
     }
 
     public int getPlayerLevel(Player player) {
+        if (player == null) return 1;
+        long now = System.currentTimeMillis();
+        Long last = levelCacheTime.get(player.getUniqueId());
+        if (last != null && now - last < 1000) {
+            Integer cached = levelCache.get(player.getUniqueId());
+            if (cached != null) {
+                return cached;
+            }
+        }
+
         Integer override = levelOverrides.get(player.getUniqueId());
-        if (override != null) return Math.max(1, Math.min(8, override));
+        int maxLevel = ConfigManager.getInstance().getLevelMax();
+        if (override != null) return Math.max(1, Math.min(maxLevel, override));
 
         ConfigManager cfg = ConfigManager.getInstance();
         UUID uuid = player.getUniqueId();
+        double[] s = stats.getOrDefault(uuid, new double[]{0, 0, 0});
 
         double xpNorm = Math.min(1.0, player.getLevel() / 300.0);
         double daysAlive = player.getStatistic(Statistic.TIME_SINCE_DEATH) / 24000.0;
         double dayNorm = Math.min(1.0, daysAlive / 30.0);
         double armorNorm = Math.min(1.0, getArmorPoints(player) / 20.0);
         double weaponNorm = Math.min(1.0, getWeaponDamage(player) / 12.0);
+        double damageNorm = Math.min(1.0, s[0] / 5000.0);
+        double kdrNorm = Math.min(1.0, (s[1] / Math.max(1.0, s[2] + 1.0)) / 5.0);
 
         double weighted = xpNorm * cfg.getThreatXpWeight()
             + dayNorm * cfg.getThreatSurvivalDaysWeight()
             + armorNorm * cfg.getThreatArmorWeight()
-            + weaponNorm * cfg.getThreatWeaponWeight();
+            + weaponNorm * cfg.getThreatWeaponWeight()
+            + damageNorm * cfg.getThreatDamageWeight()
+            + kdrNorm * cfg.getThreatKdrWeight();
+
+        double totalWeight = cfg.getThreatXpWeight()
+            + cfg.getThreatSurvivalDaysWeight()
+            + cfg.getThreatArmorWeight()
+            + cfg.getThreatWeaponWeight()
+            + cfg.getThreatDamageWeight()
+            + cfg.getThreatKdrWeight();
+        weighted = weighted / Math.max(0.0001, totalWeight);
 
         double prev = smoothedThreat.getOrDefault(uuid, weighted);
         double up = cfg.getHysteresisUpThreshold();
@@ -200,8 +243,11 @@ public class PlayerLevelManager {
 
         smoothedThreat.put(uuid, next);
 
-        int level = 1 + (int) Math.floor(Math.max(0.0, Math.min(0.9999, next)) * 8.0);
-        return Math.max(1, Math.min(8, level));
+        int level = 1 + (int) Math.floor(Math.max(0.0, Math.min(0.9999, next)) * maxLevel);
+        int clamped = Math.max(1, Math.min(maxLevel, level));
+        levelCache.put(uuid, clamped);
+        levelCacheTime.put(uuid, now);
+        return clamped;
     }
 
     private double getArmorPoints(Player player) {
@@ -270,5 +316,10 @@ public class PlayerLevelManager {
         }
 
         return baseDamage;
+    }
+
+    private void invalidateLevelCache(UUID uuid) {
+        levelCache.remove(uuid);
+        levelCacheTime.remove(uuid);
     }
 }

@@ -33,7 +33,8 @@ public class CombatBehavior {
                 if (agent.getZombie().getEquipment().getItemInMainHand().getType() != Material.BOW) {
                     agent.getZombie().getEquipment().setItemInMainHand(new ItemStack(Material.BOW));
                 }
-                if (distanceSq < 256 && agent.checkAndResetSkillCooldown("SHOOT", 3000)) { 
+                long shootCooldown = Math.max(1100L, 3200L - agent.getLevel() * 140L);
+                if (distanceSq < 256 && agent.checkAndResetSkillCooldown("SHOOT", shootCooldown)) {
                     shootArrow(agent, targetLoc);
                 }
                 break;
@@ -43,7 +44,8 @@ public class CombatBehavior {
                      agent.getZombie().getEquipment().setItemInMainHand(new ItemStack(Material.TNT));
                  }
                  // TNT 僵尸：冷却 20秒 (20000ms)，自伤，高级 TNT
-                 if (distanceSq < 400 && agent.checkAndResetSkillCooldown("TNT", 20000)) { 
+                 long tntCooldown = Math.max(9000L, 20000L - agent.getLevel() * 600L);
+                 if (distanceSq < 400 && agent.checkAndResetSkillCooldown("TNT", tntCooldown)) {
                     throwTNT(agent, targetLoc);
                 }
                 break;
@@ -63,7 +65,8 @@ public class CombatBehavior {
                      }
                      agent.getZombie().getEquipment().setItemInMainHand(potion);
                  }
-                 if (distanceSq < 100 && agent.checkAndResetSkillCooldown("POTION", 8000)) { 
+                 long potionCooldown = Math.max(3500L, 8000L - agent.getLevel() * 220L);
+                 if (distanceSq < 100 && agent.checkAndResetSkillCooldown("POTION", potionCooldown)) {
                     throwPotion(agent, targetLoc);
                  }
                  break;
@@ -72,7 +75,8 @@ public class CombatBehavior {
                  if (agent.getZombie().getEquipment().getItemInMainHand().getType() != Material.ENDER_PEARL) {
                      agent.getZombie().getEquipment().setItemInMainHand(new ItemStack(Material.ENDER_PEARL));
                  }
-                 if (distanceSq > 100 && agent.checkAndResetSkillCooldown("PEARL", 10000)) { 
+                 long pearlCooldown = Math.max(5000L, 10000L - agent.getLevel() * 250L);
+                 if (distanceSq > 100 && agent.checkAndResetSkillCooldown("PEARL", pearlCooldown)) {
                      throwPearl(agent, targetLoc);
                  }
                  break;
@@ -145,6 +149,10 @@ public class CombatBehavior {
         // 我们使用 1.6 作为基础速度。
         
         z.launchProjectile(Arrow.class, velocity);
+        if (agent.getLevel() >= 9 && Math.random() < 0.30) {
+            Vector spread = velocity.clone().add(new Vector((Math.random() - 0.5) * 0.12, (Math.random() - 0.5) * 0.05, (Math.random() - 0.5) * 0.12));
+            z.launchProjectile(Arrow.class, spread);
+        }
     }
 
     private Vector calculateTrajectory(Location from, Location to, double speed) {

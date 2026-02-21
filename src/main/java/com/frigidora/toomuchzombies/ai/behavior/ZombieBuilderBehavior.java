@@ -1,5 +1,9 @@
 package com.frigidora.toomuchzombies.ai.behavior;
 
+import java.util.Collections;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+
 import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.block.Block;
@@ -26,6 +30,8 @@ public class ZombieBuilderBehavior {
     private final BuilderPathPlanner planner = new BuilderPathPlanner();
     
     private long lastPlaceTime;
+    private long lastFailureRecoverTime = 0;
+    private final Map<String, Integer> failureCounters = new ConcurrentHashMap<>();
     
     // Optimization: Cache last move target to avoid excessive pathfinding
     private Location lastMoveTarget = null;
@@ -75,7 +81,7 @@ public class ZombieBuilderBehavior {
     private int stuckTicks = 0;
 
     private enum PlacementResult {
-        SUCCESS, TOO_FAR, NO_SUPPORT, COOLDOWN, INVALID_BLOCK
+        SUCCESS, TOO_FAR, NO_SUPPORT, COOLDOWN, INVALID_BLOCK, BLOCKED_BY_ENTITY
     }
 
     public void tick() {
@@ -99,6 +105,7 @@ public class ZombieBuilderBehavior {
 
         Location targetLoc = agent.getLastKnownTargetLocation();
         if (targetLoc == null) {
+            hitFailure("target_lost");
             setActive(false);
             return;
         }
@@ -112,6 +119,7 @@ public class ZombieBuilderBehavior {
             safeMoveTo(centerLoc, 1.2);
             stuckTicks++;
             if (stuckTicks > 60) {
+                hitFailure("off_center_timeout");
                 handleBuildFailure(zombie.getWorld().getBlockAt(selfPos.x, selfPos.y, selfPos.z));
                 stuckTicks = 0;
             }
@@ -166,26 +174,43 @@ public class ZombieBuilderBehavior {
             }
 
             if (requiredKind == BlockKind.AIR) {
-                breaker.startBreaking(currentBlock);
+                if (breaker.canBreak(currentBlock)) {
+                    breaker.startBreaking(currentBlock);
+                    if (!breaker.isBreaking()) {
+                        recoverFromPlacementFailure(currentBlock);
+                        stuckTicks++;
+                    }
+                } else {
+                    recoverFromPlacementFailure(currentBlock);
+                    stuckTicks++;
+                }
             } else {
-                int oldProgress = structureProgress;
                 PlacementResult result = placeBlock(currentBlock);
                 
                 if (result == PlacementResult.SUCCESS) {
                     stuckTicks = 0;
                 } else if (result == PlacementResult.TOO_FAR) {
+                    hitFailure("place_too_far");
                     // 核心修复：如果够不着，计算一个能构着的位置并前往
                     Location reachLoc = currentBlock.getLocation().add(0.5, -1, 0.5); // 尝试站在方块下方/侧面
                     safeMoveTo(reachLoc, 1.2);
                     stuckTicks++;
+                } else if (result == PlacementResult.BLOCKED_BY_ENTITY) {
+                    hitFailure("place_blocked_entity");
+                    recoverFromPlacementFailure(currentBlock);
+                    stuckTicks++;
                 } else if (result == PlacementResult.NO_SUPPORT) {
+                    hitFailure("place_no_support");
                     // 如果没有支撑，尝试寻找支撑点（通常是 selfPos 的脚下）
+                    recoverFromPlacementFailure(currentBlock);
                     stuckTicks++;
                 } else {
+                    hitFailure("place_other");
                     stuckTicks++;
                 }
 
                 if (stuckTicks > com.frigidora.toomuchzombies.config.ConfigManager.getInstance().getBuilderMaxBuildFailTicks()) {
+                    hitFailure("build_fail_timeout");
                     handleBuildFailure(currentBlock);
                     stuckTicks = 0;
                 }
@@ -224,6 +249,7 @@ public class ZombieBuilderBehavior {
                 return;
             }
         }
+        hitFailure("build_abort");
         setActive(false);
     }
 
@@ -434,8 +460,20 @@ public class ZombieBuilderBehavior {
     }
 
     private PlacementResult placeBlock(Block block) {
+        if (block.getType().isSolid()) {
+            hitFailure("place_target_solid");
+            return PlacementResult.INVALID_BLOCK;
+        }
+
+        for (org.bukkit.entity.Entity e : block.getWorld().getNearbyEntities(block.getLocation().add(0.5, 0.5, 0.5), 0.35, 0.85, 0.35)) {
+            if (e instanceof org.bukkit.entity.LivingEntity && !e.getUniqueId().equals(zombie.getUniqueId())) {
+                return PlacementResult.BLOCKED_BY_ENTITY;
+            }
+        }
+
         // 0. 检查方块位置是否已经被预留，防止多只僵尸在同一位置重复搭建
         if (ZombieAIManager.getInstance().isBuildSpotReserved(block.getLocation())) {
+            hitFailure("place_reserved");
             return PlacementResult.COOLDOWN; // 视为冷却中，稍后重试或跳过
         }
 
@@ -447,20 +485,13 @@ public class ZombieBuilderBehavior {
         // 2. 支撑检查
         // 优化：如果没有支撑，尝试搭脚手架
         if (!hasSupport(block)) {
-            // 尝试在下方放置方块作为支撑
             Block support = block.getRelative(BlockFace.DOWN);
-            if (support.getType() == Material.AIR) {
-                // 如果下方也是空气，递归向下太复杂，这里只做简单的一层脚手架尝试
-                // 但为了不陷入死循环，我们需要标记当前是否正在处理脚手架
-                // 这里简单返回 NO_SUPPORT，让 tick 逻辑中的 handleBuildFailure 处理
+            if (support.getType() == Material.AIR || !support.getType().isSolid()) {
+                if (placeSupportBlock(support)) {
+                    return PlacementResult.SUCCESS;
+                }
                 return PlacementResult.NO_SUPPORT;
-            } else if (!support.getType().isSolid()) {
-                 // 下方是液体或草，视为无支撑
-                 return PlacementResult.NO_SUPPORT;
             }
-            // 如果下方是固体但 hasSupport 返回 false (可能是因为垂直逻辑)，则强制视为有支撑
-            // 这里不做修改，信任 hasSupport 的判断
-            return PlacementResult.NO_SUPPORT;
         }
 
         // 3. 冷却检查
@@ -524,6 +555,57 @@ public class ZombieBuilderBehavior {
         return PlacementResult.SUCCESS;
     }
 
+    private boolean placeSupportBlock(Block support) {
+        if (support == null || support.getType().isSolid()) {
+            return false;
+        }
+        if (zombie.getLocation().distanceSquared(support.getLocation().add(0.5, 0.5, 0.5)) > 6.25) {
+            return false;
+        }
+
+        Material mat = resolveBuildMaterial();
+        support.setType(mat);
+        ZombieAIManager.getInstance().reserveBuildSpot(support.getLocation());
+        playPlaceEffects(support, mat);
+        com.frigidora.toomuchzombies.mechanics.TemporaryBlockManager.getInstance().registerBlock(
+            support.getLocation(),
+            com.frigidora.toomuchzombies.config.ConfigManager.getInstance().getBuilderTemporaryBlockDurationMs()
+        );
+        lastPlaceTime = System.currentTimeMillis();
+        return true;
+    }
+
+    private Material resolveBuildMaterial() {
+        ItemStack hand = zombie.getEquipment().getItemInMainHand();
+        if (hand.getType().isBlock() && !hand.getType().isAir() && hand.getType() != Material.TNT) {
+            return hand.getType();
+        }
+        ItemStack offHand = zombie.getEquipment().getItemInOffHand();
+        if (offHand.getType().isBlock() && !offHand.getType().isAir() && offHand.getType() != Material.TNT) {
+            return offHand.getType();
+        }
+        zombie.getEquipment().setItemInMainHand(new ItemStack(Material.COBBLESTONE));
+        return Material.COBBLESTONE;
+    }
+
+    private void recoverFromPlacementFailure(Block aroundBlock) {
+        long now = System.currentTimeMillis();
+        if (now - lastFailureRecoverTime < 600) {
+            return;
+        }
+        lastFailureRecoverTime = now;
+
+        BlockFace[] candidates = new BlockFace[] {BlockFace.NORTH, BlockFace.SOUTH, BlockFace.EAST, BlockFace.WEST};
+        for (BlockFace face : candidates) {
+            Block side = aroundBlock.getRelative(face);
+            Block sideDown = side.getRelative(BlockFace.DOWN);
+            if (!side.getType().isSolid() && sideDown.getType().isSolid()) {
+                safeMoveTo(side.getLocation().add(0.5, 0.0, 0.5), 1.25);
+                return;
+            }
+        }
+    }
+
     private void playPlaceEffects(Block block, Material mat) {
         int particleCount = com.frigidora.toomuchzombies.config.ConfigManager.getInstance().getBuilderPlaceParticleCount();
         if (particleCount > 0) {
@@ -537,6 +619,28 @@ public class ZombieBuilderBehavior {
         }
         zombie.getWorld().playSound(block.getLocation(), mat.createBlockData().getSoundGroup().getPlaceSound(), 1.0f, 0.95f);
         zombie.getWorld().playSound(block.getLocation(), org.bukkit.Sound.BLOCK_STONE_PLACE, 0.35f, 1.2f);
+
+        if (com.frigidora.toomuchzombies.TooMuchZombies.getNMSHandler() != null) {
+            int fxId = zombie.getEntityId() ^ block.getLocation().hashCode();
+            com.frigidora.toomuchzombies.TooMuchZombies.getNMSHandler().breakBlockAnimation(fxId, block.getLocation(), 2);
+            org.bukkit.Bukkit.getScheduler().runTaskLater(
+                com.frigidora.toomuchzombies.TooMuchZombies.getInstance(),
+                () -> com.frigidora.toomuchzombies.TooMuchZombies.getNMSHandler().breakBlockAnimation(fxId, block.getLocation(), -1),
+                8L
+            );
+        }
+    }
+
+    public Map<String, Integer> getFailureCountersSnapshot() {
+        return Collections.unmodifiableMap(new java.util.HashMap<>(failureCounters));
+    }
+
+    public void resetFailureCounters() {
+        failureCounters.clear();
+    }
+
+    private void hitFailure(String reason) {
+        failureCounters.merge(reason, 1, Integer::sum);
     }
     
     // Simple BlockPos helper class since we can't use NMS BlockPos easily without import issues

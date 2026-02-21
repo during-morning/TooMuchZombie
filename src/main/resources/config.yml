@@ -12,9 +12,9 @@ zombie-ai:
   build-speed: 1.0
   noise-threshold: 10
   targeting:
-    scan-cooldown-ms: 400
-    switch-score-delta: 0.20
-    max-range: 48.0
+    scan-cooldown-ms: 300
+    switch-score-delta: 0.14
+    max-range: 56.0
   build-blocks:
     - COBBLESTONE
     - DIRT
@@ -30,6 +30,9 @@ zombie-ai:
     focus-fire-range: 22.0
     flank-sync-range: 16.0
     bodyguard-scan-range: 20.0
+    encircle-range: 22.0
+    encircle-replan-ms: 700
+    breach-arrive-radius: 3.6
 
   pathing:
     formation-slot-spacing: 1.6
@@ -38,18 +41,18 @@ zombie-ai:
     separation-range: 2.2
 
   builder:
-    place-cooldown-ms: 1000
-    place-cooldown-ms-lv9: 250
-    place-cooldown-ms-lv12: 333
+    place-cooldown-ms: 850
+    place-cooldown-ms-lv9: 220
+    place-cooldown-ms-lv12: 180
     breach-request-after-ms: 3000
     max-build-fail-ticks: 40
     temporary-block-duration-ms: 120000
     temporary-block-decay-window-ms: 30000
     temporary-block-decay-particle-interval-ticks: 10
     place-particle-count: 16
-    break-hit-effect-interval-ms: 250
-    break-hit-particle-count: 6
-    break-finish-particle-count: 22
+    break-hit-effect-interval-ms: 180
+    break-hit-particle-count: 8
+    break-finish-particle-count: 26
   breaker:
     blacklist:
       - BEDROCK
@@ -88,14 +91,18 @@ spawn:
     enforce-night-only: true
 
 level:
+  max: 12
   threat:
     xp-weight: 0.22
     survival-days-weight: 0.18
     armor-weight: 0.24
     weapon-weight: 0.36
+    damage-weight: 0.20
+    kdr-weight: 0.16
   encounter:
     self-weight: 0.60
     nearby-max-weight: 0.40
+    nearby-avg-weight: 0.15
     nearby-radius: 64.0
   hysteresis:
     up-threshold: 0.55

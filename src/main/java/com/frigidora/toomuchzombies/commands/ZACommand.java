@@ -114,6 +114,8 @@ public class ZACommand implements CommandExecutor {
             java.util.Map<BreachAssignmentRole, Integer> roleStats = ZombieAIManager.getInstance().getBreachRoleStats();
             java.util.Map<String, Integer> nodeHits = ZombieAIManager.getInstance().getCooperationNodeHitStats();
             java.util.Map<com.frigidora.toomuchzombies.ai.AbilityIntent, Integer> intentHits = ZombieAIManager.getInstance().getArbitrationHitStats();
+            java.util.Map<String, Integer> buildFailStats = ZombieAIManager.getInstance().getBuilderFailureStats();
+            java.util.Map<String, Integer> breakerRejectStats = ZombieAIManager.getInstance().getBreakerRejectStats();
             int p = roleStats.getOrDefault(BreachAssignmentRole.PRIMARY, 0);
             int s = roleStats.getOrDefault(BreachAssignmentRole.SUPPORT, 0);
             int b = roleStats.getOrDefault(BreachAssignmentRole.BODYGUARD, 0);
@@ -122,6 +124,8 @@ public class ZACommand implements CommandExecutor {
             sender.sendMessage("§7breachRoleP/S/B: §f" + p + "/" + s + "/" + b + " §7tempBlocks: §f" + tempBlocks);
             sender.sendMessage("§7cooperationHits: §f" + nodeHits);
             sender.sendMessage("§7abilityIntents: §f" + intentHits);
+            sender.sendMessage("§7builderFailures: §f" + buildFailStats);
+            sender.sendMessage("§7breakerRejects: §f" + breakerRejectStats);
             return;
         }
 
@@ -148,8 +152,9 @@ public class ZACommand implements CommandExecutor {
             return;
         }
 
-        PlayerLevelManager.getInstance().setLevelOverride(target, 8);
-        sender.sendMessage("§a已将玩家 " + target.getName() + " 的等级设置为最大值 (8)");
+        int maxLevel = ConfigManager.getInstance().getLevelMax();
+        PlayerLevelManager.getInstance().setLevelOverride(target, maxLevel);
+        sender.sendMessage("§a已将玩家 " + target.getName() + " 的等级设置为最大值 (" + maxLevel + ")");
     }
 
     private void handleLevel(CommandSender sender, String[] args) {

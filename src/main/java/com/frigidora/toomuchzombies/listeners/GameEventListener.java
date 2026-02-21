@@ -488,15 +488,16 @@ public class GameEventListener implements Listener {
     }
 
     private void applyZombieStats(CreatureSpawnEvent event, Zombie zombie, int level) {
-        // 存储等级
+        int maxLevel = ConfigManager.getInstance().getLevelMax();
+        int lv = Math.max(1, Math.min(maxLevel, level));
         NamespacedKey key = new NamespacedKey(com.frigidora.toomuchzombies.TooMuchZombies.getInstance(), "zombie_level");
-        zombie.getPersistentDataContainer().set(key, PersistentDataType.INTEGER, level);
+        zombie.getPersistentDataContainer().set(key, PersistentDataType.INTEGER, lv);
         
         // 生成概率
         double spawnChance;
-        if (level <= 1) spawnChance = 0.10;
-        else if (level >= 8) spawnChance = 1.00;
-        else spawnChance = 0.10 + (level - 1) * (0.90 / 7.0);
+        if (lv <= 1) spawnChance = 0.10;
+        else if (lv >= maxLevel) spawnChance = 1.00;
+        else spawnChance = 0.10 + (lv - 1) * (0.90 / Math.max(1, maxLevel - 1));
 
         if (random.nextDouble() > spawnChance) {
             if (event != null) event.setCancelled(true);
@@ -506,36 +507,7 @@ public class GameEventListener implements Listener {
             }
             return;
         }
-        
-        // 数值调整
-        double hp = 20;
-        
-        switch (level) {
-            case 1: hp = 5 + random.nextInt(16); break; // 5-20
-            case 2: hp = 10 + random.nextInt(11); break; // 10-20
-            case 3: hp = 20 + random.nextInt(6); break; // 20-25
-            case 4: hp = 25 + random.nextInt(16); break; // 25-40
-            case 5: hp = 30 + random.nextInt(11); break; // 30-40
-            case 6: hp = 30 + random.nextInt(21); break; // 30-50
-            case 7: hp = 40 + random.nextInt(21); break; // 40-60
-            case 8: hp = 50 + random.nextInt(51); break; // 50-100
-            default: hp = 20; break;
-        }
-        
-        org.bukkit.attribute.AttributeInstance healthAttr = zombie.getAttribute(org.bukkit.attribute.Attribute.GENERIC_MAX_HEALTH);
-        if (healthAttr != null) {
-            healthAttr.setBaseValue(hp);
-            zombie.setHealth(hp);
-        }
-        
-        // 缓慢效果 (Level 1-2)
-        if (level <= 2) {
-            PotionEffectType slow = PotionEffectType.getByName("SLOWNESS");
-            if (slow == null) slow = PotionEffectType.getByName("SLOW");
-            if (slow != null) {
-                zombie.addPotionEffect(new PotionEffect(slow, Integer.MAX_VALUE, 0)); // Slowness 1
-            }
-        }
+        ZombieFactory.applyLevelAttributes(zombie, lv);
     }
 
     private int getZombieLevel(Zombie zombie) {

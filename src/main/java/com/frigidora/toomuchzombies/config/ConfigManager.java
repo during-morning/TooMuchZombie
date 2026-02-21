@@ -110,6 +110,18 @@ public class ConfigManager {
         return clampDouble(config.getDouble("zombie-ai.cooperation.bodyguard-scan-range", 20.0), 6.0, 64.0);
     }
 
+    public double getCoopEncircleRange() {
+        return clampDouble(config.getDouble("zombie-ai.cooperation.encircle-range", 18.0), 6.0, 64.0);
+    }
+
+    public long getCoopEncircleReplanMs() {
+        return clampInt(config.getInt("zombie-ai.cooperation.encircle-replan-ms", 900), 200, 5000);
+    }
+
+    public double getCoopBreachArriveRadius() {
+        return clampDouble(config.getDouble("zombie-ai.cooperation.breach-arrive-radius", 3.2), 1.0, 10.0);
+    }
+
     public double getFormationSlotSpacing() {
         return clampDouble(config.getDouble("zombie-ai.pathing.formation-slot-spacing", 1.6), 0.8, 4.0);
     }
@@ -276,12 +288,24 @@ public class ConfigManager {
         return clampDouble(config.getDouble("level.threat.weapon-weight", 0.36), 0.0, 2.0);
     }
 
+    public double getThreatDamageWeight() {
+        return clampDouble(config.getDouble("level.threat.damage-weight", 0.20), 0.0, 2.0);
+    }
+
+    public double getThreatKdrWeight() {
+        return clampDouble(config.getDouble("level.threat.kdr-weight", 0.16), 0.0, 2.0);
+    }
+
     public double getEncounterSelfWeight() {
         return clampDouble(config.getDouble("level.encounter.self-weight", 0.60), 0.0, 1.0);
     }
 
     public double getEncounterNearbyMaxWeight() {
         return clampDouble(config.getDouble("level.encounter.nearby-max-weight", 0.40), 0.0, 1.0);
+    }
+
+    public double getEncounterNearbyAvgWeight() {
+        return clampDouble(config.getDouble("level.encounter.nearby-avg-weight", 0.15), 0.0, 1.0);
     }
 
     public double getEncounterNearbyRadius() {
@@ -294,6 +318,10 @@ public class ConfigManager {
 
     public double getHysteresisDownThreshold() {
         return clampDouble(config.getDouble("level.hysteresis.down-threshold", 0.75), 0.0, 2.0);
+    }
+
+    public int getLevelMax() {
+        return clampInt(config.getInt("level.max", 12), 4, 20);
     }
 
     public long getBreachLeaseMs() {
