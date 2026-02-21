@@ -1,0 +1,126 @@
+language: zh
+
+hive-mind:
+  enabled: true
+  sensor-range: 32
+  memory-duration: 0.25
+
+zombie-ai:
+  override:
+    mode: hybrid
+  break-speed: 1.0
+  build-speed: 1.0
+  noise-threshold: 10
+  targeting:
+    scan-cooldown-ms: 400
+    switch-score-delta: 0.20
+    max-range: 48.0
+  build-blocks:
+    - COBBLESTONE
+    - DIRT
+    - OAK_PLANKS
+    - NETHERRACK
+  build-duration: 20
+
+  cooperation:
+    retreat-health-threshold: 0.35
+    regroup-distance: 14.0
+    ally-disadvantage-threshold: 2
+    breach-support-cooldown-ms: 3000
+    focus-fire-range: 22.0
+    flank-sync-range: 16.0
+    bodyguard-scan-range: 20.0
+
+  pathing:
+    formation-slot-spacing: 1.6
+    formation-replan-threshold: 1.2
+    separation-weight: 0.6
+    separation-range: 2.2
+
+  builder:
+    place-cooldown-ms: 1000
+    place-cooldown-ms-lv9: 250
+    place-cooldown-ms-lv12: 333
+    breach-request-after-ms: 3000
+    max-build-fail-ticks: 40
+    temporary-block-duration-ms: 120000
+    temporary-block-decay-window-ms: 30000
+    temporary-block-decay-particle-interval-ticks: 10
+    place-particle-count: 16
+    break-hit-effect-interval-ms: 250
+    break-hit-particle-count: 6
+    break-finish-particle-count: 22
+  breaker:
+    blacklist:
+      - BEDROCK
+      - BARRIER
+      - END_PORTAL
+      - END_PORTAL_FRAME
+      - COMMAND_BLOCK
+      - CHAIN_COMMAND_BLOCK
+      - REPEATING_COMMAND_BLOCK
+      - STRUCTURE_BLOCK
+      - STRUCTURE_VOID
+      - JIGSAW
+      - BEACON
+      - RESPAWN_ANCHOR
+    whitelist: []
+
+zombie-roles:
+  miner: 0.1
+  builder: 0.3
+  archer: 0.1
+  ender: 0.25
+  nurse: 0.05
+  rusher: 0.05
+  suicide: 0.05
+
+spawn:
+  max-zombies-per-chunk: 50
+  mspt-threshold: 45
+  algorithm:
+    enabled: true
+    chunk-cooldown-ms: 3000
+    max-global-zombies: 2000
+    max-near-player: 100
+    spawn-budget-per-player: 4
+    accept-chance: 1.0
+    enforce-night-only: true
+
+level:
+  threat:
+    xp-weight: 0.22
+    survival-days-weight: 0.18
+    armor-weight: 0.24
+    weapon-weight: 0.36
+  encounter:
+    self-weight: 0.60
+    nearby-max-weight: 0.40
+    nearby-radius: 64.0
+  hysteresis:
+    up-threshold: 0.55
+    down-threshold: 0.75
+
+breach:
+  lease-ms: 4000
+  role-caps:
+    primary: 2
+    support: 4
+    bodyguard: 3
+  assignment:
+    primary-distance-bias: 0.85
+    support-distance-bias: 1.0
+    bodyguard-distance-bias: 1.1
+
+blood-moon:
+  chance: 0.05
+  multiplier: 3.0
+  health-multiplier: 5.0
+
+phantom:
+  max-per-player: 20
+  spawn-radius: 50
+  spawn-chance: 0.1
+  explode-chance: 0.04
+  break-block-chance: 0.3
+  attack-effect-chance: 0.1
