@@ -1,0 +1,110 @@
+name: Bump And Release
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: "Version bump type"
+        required: true
+        default: patch
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+
+permissions:
+  contents: write
+
+jobs:
+  bump-tag-release:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+
+      - name: Resolve Next Version
+        id: ver
+        shell: bash
+        run: |
+          set -euo pipefail
+          CURRENT="$(mvn help:evaluate -Dexpression=project.version -q -DforceStdout)"
+          CURRENT="${CURRENT%-SNAPSHOT}"
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT"
+
+          BUMP="${{ github.event.inputs.bump }}"
+          if [ -z "$BUMP" ]; then
+            BUMP="patch"
+          fi
+
+          case "$BUMP" in
+            major)
+              MAJOR=$((MAJOR + 1))
+              MINOR=0
+              PATCH=0
+              ;;
+            minor)
+              MINOR=$((MINOR + 1))
+              PATCH=0
+              ;;
+            patch)
+              PATCH=$((PATCH + 1))
+              ;;
+            *)
+              echo "Unsupported bump type: $BUMP"
+              exit 1
+              ;;
+          esac
+
+          NEXT="${MAJOR}.${MINOR}.${PATCH}"
+          echo "current=$CURRENT" >> "$GITHUB_OUTPUT"
+          echo "next=$NEXT" >> "$GITHUB_OUTPUT"
+          echo "tag=v$NEXT" >> "$GITHUB_OUTPUT"
+
+      - name: Update Version Files
+        shell: bash
+        run: |
+          set -euo pipefail
+          NEXT="${{ steps.ver.outputs.next }}"
+          mvn -B versions:set -DnewVersion="${NEXT}" -DgenerateBackupPoms=false
+          sed -i "s#^version: [0-9]\\+\\.[0-9]\\+\\.[0-9]\\+#version: ${NEXT}#" plugin.yml
+
+      - name: Build
+        run: mvn -B -DskipTests package
+
+      - name: Commit And Push Version Bump
+        shell: bash
+        run: |
+          set -euo pipefail
+          NEXT="${{ steps.ver.outputs.next }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add pom.xml plugin.yml
+          git commit -m "chore(release): v${NEXT} [skip ci]"
+          git push origin HEAD:main
+
+      - name: Create And Push Tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="${{ steps.ver.outputs.tag }}"
+          if git rev-parse "$TAG" >/dev/null 2>&1; then
+            echo "Tag $TAG already exists. Skip."
+            exit 0
+          fi
+          git tag "$TAG"
+          git push origin "$TAG"
