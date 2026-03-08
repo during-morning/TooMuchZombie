@@ -1,0 +1,73 @@
+name: CI Build & Deliver
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ci-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+
+      - name: Build (compile + package)
+        run: mvn -B -DskipTests package
+
+      - name: Prepare single build asset
+        shell: bash
+        run: |
+          set -euo pipefail
+          JAR_PATH="$(ls -1 target/TooMuchZombies-*.jar | head -n 1)"
+          cp "$JAR_PATH" target/TooMuchZombies-latest.jar
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: TooMuchZombies-build-${{ github.sha }}
+          path: target/TooMuchZombies-latest.jar
+          if-no-files-found: error
+
+  release:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    needs: build
+
+    steps:
+      - name: Download build artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: TooMuchZombies-build-${{ github.sha }}
+          path: dist
+
+      - name: Publish normal release per build
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: build-${{ github.run_number }}
+          name: Build #${{ github.run_number }}
+          prerelease: false
+          make_latest: false
+          generate_release_notes: false
+          body: |
+            Automated build from `${{ github.sha }}`.
+          files: |
+            dist/TooMuchZombies-latest.jar
+          fail_on_unmatched_files: true
