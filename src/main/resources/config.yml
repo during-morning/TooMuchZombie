@@ -11,6 +11,7 @@ zombie-ai:
   break-speed: 1.0
   build-speed: 1.0
   noise-threshold: 10
+  terrain-modification-enabled: true
   targeting:
     scan-cooldown-ms: 300
     switch-score-delta: 0.14
