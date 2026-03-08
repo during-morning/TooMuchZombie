@@ -6,7 +6,7 @@
 
     <groupId>com.frigidora</groupId>
     <artifactId>TooMuchZombies</artifactId>
-    <version>2.9.6</version>
+    <version>2.9.8</version>
     <packaging>jar</packaging>
 
     <name>TooMuchZombies</name>

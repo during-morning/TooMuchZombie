@@ -32,42 +32,22 @@ jobs:
       - name: Build (compile + package)
         run: mvn -B -DskipTests package
 
-      - name: Prepare single build asset
-        shell: bash
-        run: |
-          set -euo pipefail
-          JAR_PATH="$(ls -1 target/TooMuchZombies-*.jar | head -n 1)"
-          cp "$JAR_PATH" target/TooMuchZombies-latest.jar
-
-      - name: Upload build artifact
+      - name: Upload JAR Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: TooMuchZombies-build-${{ github.sha }}
-          path: target/TooMuchZombies-latest.jar
+          name: TooMuchZombies-${{ github.sha }}
+          path: target/TooMuchZombies-*.jar
           if-no-files-found: error
 
-  release:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
-    needs: build
-
-    steps:
-      - name: Download build artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: TooMuchZombies-build-${{ github.sha }}
-          path: dist
-
-      - name: Publish normal release per build
+      - name: Publish Nightly Pre-Release (main only)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: build-${{ github.sha }}
-          name: Build ${{ github.sha }}
-          prerelease: false
-          make_latest: false
+          tag_name: nightly
+          name: Nightly Build
+          prerelease: true
           generate_release_notes: false
           body: |
-            Automated build from `${{ github.sha }}`.
+            Automated nightly build from `${{ github.sha }}`.
           files: |
-            dist/TooMuchZombies-latest.jar
-          fail_on_unmatched_files: true
+            target/TooMuchZombies-*.jar
