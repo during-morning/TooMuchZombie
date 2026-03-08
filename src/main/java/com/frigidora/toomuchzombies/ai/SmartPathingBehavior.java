@@ -108,15 +108,15 @@ public class SmartPathingBehavior {
              Location nearestLight = LightSourceManager.getInstance().getNearestLightSource(z.getLocation(), 15.0);
              
              if (nearestLight != null) {
-                 z.addPotionEffect(new org.bukkit.potion.PotionEffect(org.bukkit.potion.PotionEffectType.SLOWNESS, 40, 0));
-                 z.addPotionEffect(new org.bukkit.potion.PotionEffect(org.bukkit.potion.PotionEffectType.WEAKNESS, 40, 0));
-                 z.addPotionEffect(new org.bukkit.potion.PotionEffect(org.bukkit.potion.PotionEffectType.GLOWING, 40, 0));
+                 z.addPotionEffect(new org.bukkit.potion.PotionEffect(org.bukkit.potion.PotionEffectType.SLOWNESS, 60, 1));
+                 z.addPotionEffect(new org.bukkit.potion.PotionEffect(org.bukkit.potion.PotionEffectType.WEAKNESS, 60, 1));
+                 z.addPotionEffect(new org.bukkit.potion.PotionEffect(org.bukkit.potion.PotionEffectType.GLOWING, 60, 0));
 
                  Vector fleeDir = z.getLocation().toVector().subtract(nearestLight.toVector()).normalize();
-                 Location fleeTarget = z.getLocation().add(fleeDir.multiply(10));
+                 Location fleeTarget = z.getLocation().add(fleeDir.multiply(12));
                  
                  if (TooMuchZombies.getNMSHandler() != null) {
-                     TooMuchZombies.getNMSHandler().moveTo(z, fleeTarget, 1.4);
+                     TooMuchZombies.getNMSHandler().moveTo(z, fleeTarget, 1.0);
                  }
                  return;
              }
@@ -178,8 +178,8 @@ public class SmartPathingBehavior {
         } else {
             // 确保没有被锁定移动
             if (!agent.isAiPaused() && z.getTarget() != null) {
-                // 让原版 AI 处理，或者显式调用 moveTo
-                // agent.moveTo(targetLoc, 1.0);
+                // 主动追击，避免原版寻路与自定义协作行为冲突导致来回踱步。
+                agent.moveTo(targetLoc, 1.0);
             }
         }
         
