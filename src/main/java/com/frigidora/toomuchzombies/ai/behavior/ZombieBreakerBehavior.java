@@ -75,86 +75,14 @@ public class ZombieBreakerBehavior {
     }
 
     public boolean canBreak(Block block) {
-        if (block == null) return false;
-        refreshBreakRulesIfNeeded();
-        return isBreakAllowed(block);
+        // 按需求全局禁用僵尸破坏方块。
+        return false;
     }
 
     public void tick() {
         if (currentTarget == null) return;
-        refreshBreakRulesIfNeeded();
-
-        if (agent.getRole() != com.frigidora.toomuchzombies.enums.ZombieRole.BUILDER &&
-            agent.getRole() != com.frigidora.toomuchzombies.enums.ZombieRole.MINER) {
-            hitReject("role_forbidden");
-            stopBreaking();
-            return;
-        }
-        
-        // Validation
-        if (currentTarget.getType() == Material.AIR || currentTarget.getType() == Material.BEDROCK) {
-            hitReject("invalid_target");
-            stopBreaking();
-            return;
-        }
-
-        if (!isBreakAllowed(currentTarget)) {
-            hitReject("policy_blocked");
-            stopBreaking();
-            return;
-        }
-
-        // 信标保护检查：禁止在活跃信标 50 格内破坏方块
-        if (com.frigidora.toomuchzombies.mechanics.BeaconManager.getInstance().isNearActiveBeacon(currentTarget.getLocation(), 20.0)) {
-            hitReject("beacon_protected");
-            stopBreaking();
-            return;
-        }
-        
-        // 距离检查：缩小到 2.5 格 (距离平方 6.25)
-        if (!zombie.getWorld().equals(currentTarget.getWorld()) || zombie.getLocation().distanceSquared(currentTarget.getLocation().add(0.5, 0.5, 0.5)) > 6.25) { 
-            hitReject("out_of_range");
-            stopBreaking();
-            return;
-        }
-
-        // Calculate speed
-        float speed = getBreakSpeed(currentTarget);
-        
-        // 协作加成：检查有多少其他僵尸也在挖这个方块
-        int miners = ZombieAIManager.getInstance().getMinersOnBlock(currentTarget.getLocation());
-        if (miners > 1) {
-            speed *= (1.0f + (miners - 1) * 0.5f); // 每多一个僵尸，速度增加 50%
-        }
-        
-        breakProgress += speed;
-        
-        // 检查是否卡住太久 (超过 3 秒)，如果是，请求爆破支援
-        if (System.currentTimeMillis() - startBreakTime > ConfigManager.getInstance().getBuilderBreachRequestAfterMs()) {
-             ZombieAIManager.getInstance().requestBreach(currentTarget.getLocation());
-        }
-
-        // Visuals
-        long hitEffectIntervalMs = ConfigManager.getInstance().getBreakerHitEffectIntervalMs();
-        if (System.currentTimeMillis() - lastBreakSoundTime > hitEffectIntervalMs) {
-            int hitParticleCount = ConfigManager.getInstance().getBreakerHitParticleCount();
-            zombie.getWorld().playSound(currentTarget.getLocation(), currentTarget.getType().createBlockData().getSoundGroup().getHitSound(), 1.0f, 0.8f);
-            if (hitParticleCount > 0) {
-                zombie.getWorld().spawnParticle(org.bukkit.Particle.BLOCK, currentTarget.getLocation().add(0.5, 0.5, 0.5), hitParticleCount, 0.2, 0.2, 0.2, currentTarget.getBlockData());
-            }
-            zombie.swingMainHand();
-            lastBreakSoundTime = System.currentTimeMillis();
-        }
-        
-        // Send packet update (0-9)
-        int stage = Math.max(0, Math.min(9, (int) (breakProgress * 10) - 1));
-        sendBreakPacket(currentTarget, stage);
-
-        // Finish
-        if (breakProgress >= 1.0f) {
-            breakBlock(currentTarget);
-            stopBreaking();
-        }
+        // 按需求全局禁用僵尸破坏方块。
+        stopBreaking();
     }
 
     private float getBreakSpeed(Block block) {

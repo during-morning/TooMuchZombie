@@ -49,8 +49,16 @@ public class SmartPathingBehavior {
         ZombieSuicideBehavior suicide = agent.getSuicideBehavior();
         ZombieCooperationBehavior cooperation = agent.getCooperationBehavior();
 
-        // 按当前玩法要求默认开启地形改造，保证僵尸能搭建/破坏。
-        final boolean terrainModificationEnabled = true;
+        // 按需求禁用地形改造：不铺地板、不破坏方块。
+        final boolean terrainModificationEnabled = false;
+        if (!terrainModificationEnabled) {
+            if (builder.isActive()) {
+                builder.setActive(false);
+            }
+            if (breaker.isBreaking()) {
+                breaker.stopBreaking();
+            }
+        }
 
         // 2. 自爆僵尸冲锋逻辑 (最高优先级)
         if (suicide.isActive()) {
