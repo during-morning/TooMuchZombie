@@ -1,0 +1,53 @@
+name: CI Build & Deliver
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ci-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+
+      - name: Build (compile + package)
+        run: mvn -B -DskipTests package
+
+      - name: Upload JAR Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: TooMuchZombies-${{ github.sha }}
+          path: target/TooMuchZombies-*.jar
+          if-no-files-found: error
+
+      - name: Publish Nightly Pre-Release (main only)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: nightly
+          name: Nightly Build
+          prerelease: true
+          generate_release_notes: false
+          body: |
+            Automated nightly build from `${{ github.sha }}`.
+          files: |
+            target/TooMuchZombies-*.jar

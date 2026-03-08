@@ -49,6 +49,17 @@ public class SmartPathingBehavior {
         ZombieSuicideBehavior suicide = agent.getSuicideBehavior();
         ZombieCooperationBehavior cooperation = agent.getCooperationBehavior();
 
+        // 按需求禁用地形改造：不铺地板、不破坏方块。
+        final boolean terrainModificationEnabled = false;
+        if (!terrainModificationEnabled) {
+            if (builder.isActive()) {
+                builder.setActive(false);
+            }
+            if (breaker.isBreaking()) {
+                breaker.stopBreaking();
+            }
+        }
+
         // 2. 自爆僵尸冲锋逻辑 (最高优先级)
         if (suicide.isActive()) {
             suicide.tick();
@@ -59,7 +70,7 @@ public class SmartPathingBehavior {
         }
 
         // 3. 移动锁定检查（如果正在搭建或破坏，禁止原版移动）
-        if (agent.isAiPaused() || builder.isActive() || breaker.isBreaking()) {
+        if (agent.isAiPaused() || (terrainModificationEnabled && (builder.isActive() || breaker.isBreaking()))) {
             // 只有当不是 Builder 模式，或者 Builder 明确不需要移动时才停止路径
             if (!builder.isActive()) {
                 if (z.getPathfinder().hasPath()) {
@@ -158,7 +169,7 @@ public class SmartPathingBehavior {
         boolean isSpecialist = (agent.getRole() == ZombieRole.BUILDER || agent.getRole() == ZombieRole.MINER);
         
         // 增加建造意愿：专家僵尸更容易开启建筑模式，普通僵尸如果卡住较久也会尝试
-        if (isSpecialist) {
+        if (terrainModificationEnabled && isSpecialist) {
             if (agent.isStuck() || Math.random() < 0.05) { // 专家有 5% 概率主动开启建筑模式
                 builder.setActive(true);
                 builder.tick();
@@ -167,7 +178,7 @@ public class SmartPathingBehavior {
         }
         
         // 9. 正常移动逻辑 (Vanilla Pathfinding)
-        if (isSpecialist && agent.checkAndResetSkillCooldown("STRUCT_OBSTACLE_CHECK", 1000)) {
+        if (terrainModificationEnabled && isSpecialist && agent.checkAndResetSkillCooldown("STRUCT_OBSTACLE_CHECK", 1000)) {
             Vector flatDir = targetLoc.toVector().subtract(z.getLocation().toVector()).setY(0);
             if (flatDir.lengthSquared() < 0.01) flatDir = z.getLocation().getDirection().setY(0);
             if (flatDir.lengthSquared() > 0.01) flatDir.normalize();
@@ -196,7 +207,7 @@ public class SmartPathingBehavior {
         
         // 10. 简单的障碍物处理 (Fallback for non-specialists or when builder is not active)
         // 仅处理面前的门/玻璃等脆弱物体
-        if (!builder.isActive() && isSpecialist) {
+        if (terrainModificationEnabled && !builder.isActive() && isSpecialist) {
             handleSimpleObstacle(z, targetLoc, breaker);
         }
     }
