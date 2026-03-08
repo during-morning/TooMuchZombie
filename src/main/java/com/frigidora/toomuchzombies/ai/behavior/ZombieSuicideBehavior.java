@@ -29,6 +29,13 @@ public class ZombieSuicideBehavior {
     public void tick() {
         if (agent.getRole() != ZombieRole.SUICIDE) return;
 
+        // 信标范围内禁止技能（包括自爆冲锋）。
+        if (com.frigidora.toomuchzombies.mechanics.BeaconManager.getInstance().isNearActiveBeacon(zombie.getLocation(), 24.0)) {
+            isCharging = false;
+            breachTarget = null;
+            return;
+        }
+
         // 如果已经在冲锋中
         if (isCharging) {
             if (breachTarget == null) {
@@ -109,7 +116,7 @@ public class ZombieSuicideBehavior {
         }
 
         // 创建定向爆炸，破坏方块
-        zombie.getWorld().createExplosion(zombie.getLocation(), 2.5F, false, true);
+        zombie.getWorld().createExplosion(zombie.getLocation(), 2.5F, false, false);
         zombie.setHealth(0);
         zombie.remove(); // 彻底移除，触发死亡事件
     }

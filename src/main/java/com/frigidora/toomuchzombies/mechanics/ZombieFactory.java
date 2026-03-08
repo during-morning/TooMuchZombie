@@ -418,27 +418,27 @@ public class ZombieFactory {
         int lv = Math.max(1, Math.min(maxLevel, level));
         double t = (lv - 1.0) / Math.max(1.0, maxLevel - 1.0);
 
-        double health = 20.0 + Math.pow(t, 1.25) * 900.0;
+        double health = 20.0 + Math.pow(t, 1.12) * 120.0;
         if (lv <= 4) {
-            health *= (0.85 + RANDOM.nextDouble() * 0.30);
+            health *= (0.90 + RANDOM.nextDouble() * 0.20);
         }
 
         if (zombie.getAttribute(Attribute.GENERIC_MAX_HEALTH) != null) {
-            zombie.getAttribute(Attribute.GENERIC_MAX_HEALTH).setBaseValue(Math.min(1024.0, health));
-            zombie.setHealth(Math.min(zombie.getAttribute(Attribute.GENERIC_MAX_HEALTH).getValue(), Math.min(1024.0, health)));
+            zombie.getAttribute(Attribute.GENERIC_MAX_HEALTH).setBaseValue(Math.min(256.0, health));
+            zombie.setHealth(Math.min(zombie.getAttribute(Attribute.GENERIC_MAX_HEALTH).getValue(), Math.min(256.0, health)));
         }
 
         if (zombie.getAttribute(Attribute.GENERIC_ATTACK_DAMAGE) != null) {
-            zombie.getAttribute(Attribute.GENERIC_ATTACK_DAMAGE).setBaseValue(3.0 + t * 12.0);
+            zombie.getAttribute(Attribute.GENERIC_ATTACK_DAMAGE).setBaseValue(2.5 + t * 7.5);
         }
         if (zombie.getAttribute(Attribute.GENERIC_MOVEMENT_SPEED) != null) {
             zombie.getAttribute(Attribute.GENERIC_MOVEMENT_SPEED).setBaseValue(0.23 + t * 0.12);
         }
         if (zombie.getAttribute(Attribute.GENERIC_ARMOR) != null) {
-            zombie.getAttribute(Attribute.GENERIC_ARMOR).setBaseValue(1.0 + t * 14.0);
+            zombie.getAttribute(Attribute.GENERIC_ARMOR).setBaseValue(0.5 + t * 6.0);
         }
         if (zombie.getAttribute(Attribute.GENERIC_ARMOR_TOUGHNESS) != null) {
-            zombie.getAttribute(Attribute.GENERIC_ARMOR_TOUGHNESS).setBaseValue(t * 8.0);
+            zombie.getAttribute(Attribute.GENERIC_ARMOR_TOUGHNESS).setBaseValue(t * 3.0);
         }
         if (zombie.getAttribute(Attribute.GENERIC_KNOCKBACK_RESISTANCE) != null) {
             zombie.getAttribute(Attribute.GENERIC_KNOCKBACK_RESISTANCE).setBaseValue(Math.min(1.0, t * 0.95));
