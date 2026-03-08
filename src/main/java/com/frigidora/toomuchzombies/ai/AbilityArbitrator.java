@@ -28,7 +28,7 @@ public class AbilityArbitrator {
         }
 
         Location loc = agent.getZombie().getLocation();
-        if (BeaconManager.getInstance().getNearestActiveBeacon(loc, 50.0) != null
+        if (BeaconManager.getInstance().getNearestActiveBeacon(loc, 20.0) != null
             || LightSourceManager.getInstance().getNearestLightSource(loc, 15.0) != null) {
             return AbilityIntent.SURVIVE;
         }
