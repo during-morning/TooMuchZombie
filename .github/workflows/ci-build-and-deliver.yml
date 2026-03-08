@@ -1,0 +1,80 @@
+name: CI Build & Deliver
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ci-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+
+      - name: Build (compile + package)
+        run: mvn -B -DskipTests package
+
+      - name: Prepare single release asset
+        shell: bash
+        run: |
+          set -euo pipefail
+          JAR_PATH="$(ls -1 target/TooMuchZombies-*.jar | head -n 1)"
+          cp "$JAR_PATH" target/TooMuchZombies-latest.jar
+
+      - name: Upload JAR Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: TooMuchZombies-${{ github.sha }}
+          path: target/TooMuchZombies-latest.jar
+          if-no-files-found: error
+
+      - name: Clean old nightly assets (main only)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          release_json=$(gh api "repos/${{ github.repository }}/releases/tags/nightly" 2>/dev/null || true)
+          if [ -z "$release_json" ]; then
+            echo "No existing nightly release."
+            exit 0
+          fi
+          echo "$release_json" | jq -r '.assets[].id' | while read -r id; do
+            if [ -n "$id" ]; then
+              gh api -X DELETE "repos/${{ github.repository }}/releases/assets/${id}" || true
+            fi
+          done
+
+      - name: Publish Nightly Release (main only)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: nightly
+          name: Nightly Build
+          prerelease: false
+          make_latest: true
+          generate_release_notes: false
+          body: |
+            Automated build from `${{ github.sha }}`.
+          files: |
+            target/TooMuchZombies-latest.jar
+          overwrite_files: true
