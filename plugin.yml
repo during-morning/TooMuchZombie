@@ -1,5 +1,5 @@
 name: TooMuchZombies
-version: 2.9.8
+version: 2.9.9
 main: com.frigidora.toomuchzombies.TooMuchZombies
 api-version: 1.21
 authors: [Frigidora]
