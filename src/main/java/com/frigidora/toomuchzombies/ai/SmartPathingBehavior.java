@@ -85,20 +85,31 @@ public class SmartPathingBehavior {
             // 但如果正在战斗（有目标），后续逻辑会覆盖它
         }
 
-        // 5. 信标避让 (保持不变)
-        if (agent.checkAndResetSkillCooldown("BEACON_CHECK", 500)) {
-             Location nearestBeacon = BeaconManager.getInstance().getNearestActiveBeacon(z.getLocation(), 50.0);
+        // 5. 信标避让（增加滞后与战斗豁免，避免来回踱步）
+        if (agent.checkAndResetSkillCooldown("BEACON_CHECK", 650)) {
+             Location nearestBeacon = BeaconManager.getInstance().getNearestActiveBeacon(z.getLocation(), 24.0);
              if (nearestBeacon != null) {
-                 z.addPotionEffect(new org.bukkit.potion.PotionEffect(org.bukkit.potion.PotionEffectType.WEAKNESS, 40, 254));
-                 z.damage(2.5);
-                 
-                 // 逃离逻辑...
-                 Vector fleeDir = z.getLocation().toVector().subtract(nearestBeacon.toVector()).normalize();
-                 Location fleeTarget = z.getLocation().add(fleeDir.multiply(15));
-                 if (TooMuchZombies.getNMSHandler() != null) {
-                     TooMuchZombies.getNMSHandler().moveTo(z, fleeTarget, 2.0);
+                 double beaconDistSq = z.getLocation().distanceSquared(nearestBeacon);
+                 LivingEntity currentTarget = agent.getTargetEntity();
+                 boolean closeCombat = currentTarget != null
+                     && currentTarget.isValid()
+                     && currentTarget.getWorld().equals(z.getWorld())
+                     && currentTarget.getLocation().distanceSquared(z.getLocation()) <= 16.0;
+
+                 // 已经贴身交战时不强行逃离，避免 AI 在信标边缘反复横跳。
+                 if (closeCombat) {
+                     z.addPotionEffect(new org.bukkit.potion.PotionEffect(org.bukkit.potion.PotionEffectType.WEAKNESS, 40, 1));
+                 } else if (beaconDistSq <= 18.0 * 18.0) {
+                     z.addPotionEffect(new org.bukkit.potion.PotionEffect(org.bukkit.potion.PotionEffectType.WEAKNESS, 40, 2));
+                     z.damage(1.0);
+
+                     Vector fleeDir = z.getLocation().toVector().subtract(nearestBeacon.toVector()).normalize();
+                     Location fleeTarget = z.getLocation().add(fleeDir.multiply(14));
+                     if (TooMuchZombies.getNMSHandler() != null) {
+                         TooMuchZombies.getNMSHandler().moveTo(z, fleeTarget, 1.2);
+                     }
+                     return;
                  }
-                 return;
              }
         }
 
@@ -108,15 +119,15 @@ public class SmartPathingBehavior {
              Location nearestLight = LightSourceManager.getInstance().getNearestLightSource(z.getLocation(), 15.0);
              
              if (nearestLight != null) {
-                 z.addPotionEffect(new org.bukkit.potion.PotionEffect(org.bukkit.potion.PotionEffectType.SLOWNESS, 40, 0));
-                 z.addPotionEffect(new org.bukkit.potion.PotionEffect(org.bukkit.potion.PotionEffectType.WEAKNESS, 40, 0));
-                 z.addPotionEffect(new org.bukkit.potion.PotionEffect(org.bukkit.potion.PotionEffectType.GLOWING, 40, 0));
+                 z.addPotionEffect(new org.bukkit.potion.PotionEffect(org.bukkit.potion.PotionEffectType.SLOWNESS, 60, 1));
+                 z.addPotionEffect(new org.bukkit.potion.PotionEffect(org.bukkit.potion.PotionEffectType.WEAKNESS, 60, 1));
+                 z.addPotionEffect(new org.bukkit.potion.PotionEffect(org.bukkit.potion.PotionEffectType.GLOWING, 60, 0));
 
                  Vector fleeDir = z.getLocation().toVector().subtract(nearestLight.toVector()).normalize();
-                 Location fleeTarget = z.getLocation().add(fleeDir.multiply(10));
+                 Location fleeTarget = z.getLocation().add(fleeDir.multiply(12));
                  
                  if (TooMuchZombies.getNMSHandler() != null) {
-                     TooMuchZombies.getNMSHandler().moveTo(z, fleeTarget, 1.4);
+                     TooMuchZombies.getNMSHandler().moveTo(z, fleeTarget, 1.0);
                  }
                  return;
              }
@@ -178,8 +189,8 @@ public class SmartPathingBehavior {
         } else {
             // 确保没有被锁定移动
             if (!agent.isAiPaused() && z.getTarget() != null) {
-                // 让原版 AI 处理，或者显式调用 moveTo
-                // agent.moveTo(targetLoc, 1.0);
+                // 主动追击，避免原版寻路与自定义协作行为冲突导致来回踱步。
+                agent.moveTo(targetLoc, 1.0);
             }
         }
         

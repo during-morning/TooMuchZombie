@@ -81,15 +81,15 @@ zombie-roles:
   suicide: 0.05
 
 spawn:
-  max-zombies-per-chunk: 50
+  max-zombies-per-chunk: 24
   mspt-threshold: 45
   algorithm:
     enabled: true
     chunk-cooldown-ms: 3000
-    max-global-zombies: 2000
-    max-near-player: 100
-    spawn-budget-per-player: 4
-    accept-chance: 1.0
+    max-global-zombies: 900
+    max-near-player: 40
+    spawn-budget-per-player: 2
+    accept-chance: 0.6
     enforce-night-only: true
 
 level:
@@ -122,9 +122,9 @@ breach:
     bodyguard-distance-bias: 1.1
 
 blood-moon:
-  chance: 0.05
-  multiplier: 3.0
-  health-multiplier: 5.0
+  chance: 0.02
+  multiplier: 1.8
+  health-multiplier: 2.0
 
 phantom:
   max-per-player: 20
