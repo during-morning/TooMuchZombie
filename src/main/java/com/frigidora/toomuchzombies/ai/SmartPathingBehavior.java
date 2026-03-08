@@ -91,9 +91,12 @@ public class SmartPathingBehavior {
         
         // 4. 协作逻辑 (Combat Zombies)
         if (agent.getRole() != ZombieRole.BUILDER && agent.getRole() != ZombieRole.MINER && agent.getRole() != ZombieRole.SUICIDE) {
-            cooperation.tick();
-            // 如果协作模块接管了移动（例如正在跟随），它会自行处理，不需要后续逻辑
-            // 但如果正在战斗（有目标），后续逻辑会覆盖它
+            // 有明确目标且距离不远时，减少协作重排，避免来回踱步。
+            boolean suppressCoop = targetLoc != null && z.getWorld().equals(targetLoc.getWorld())
+                && z.getLocation().distanceSquared(targetLoc) <= 20 * 20;
+            if (!suppressCoop) {
+                cooperation.tick();
+            }
         }
 
         // 5. 信标避让（增加滞后与战斗豁免，避免来回踱步）
