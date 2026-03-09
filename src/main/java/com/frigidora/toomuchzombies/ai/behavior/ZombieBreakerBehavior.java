@@ -105,7 +105,7 @@ public class ZombieBreakerBehavior {
         }
 
         // 信标保护检查：禁止在活跃信标 50 格内破坏方块
-        if (com.frigidora.toomuchzombies.mechanics.BeaconManager.getInstance().isNearActiveBeacon(currentTarget.getLocation(), 50.0)) {
+        if (com.frigidora.toomuchzombies.mechanics.BeaconManager.getInstance().isNearActiveBeacon(currentTarget.getLocation(), 20.0)) {
             hitReject("beacon_protected");
             stopBreaking();
             return;
