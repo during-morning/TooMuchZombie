@@ -49,6 +49,9 @@ public class SmartPathingBehavior {
         ZombieSuicideBehavior suicide = agent.getSuicideBehavior();
         ZombieCooperationBehavior cooperation = agent.getCooperationBehavior();
 
+        // 按当前玩法要求默认开启地形改造，保证僵尸能搭建/破坏。
+        final boolean terrainModificationEnabled = true;
+
         // 2. 自爆僵尸冲锋逻辑 (最高优先级)
         if (suicide.isActive()) {
             suicide.tick();
@@ -59,7 +62,7 @@ public class SmartPathingBehavior {
         }
 
         // 3. 移动锁定检查（如果正在搭建或破坏，禁止原版移动）
-        if (agent.isAiPaused() || builder.isActive() || breaker.isBreaking()) {
+        if (agent.isAiPaused() || (terrainModificationEnabled && (builder.isActive() || breaker.isBreaking()))) {
             // 只有当不是 Builder 模式，或者 Builder 明确不需要移动时才停止路径
             if (!builder.isActive()) {
                 if (z.getPathfinder().hasPath()) {
@@ -80,25 +83,39 @@ public class SmartPathingBehavior {
         
         // 4. 协作逻辑 (Combat Zombies)
         if (agent.getRole() != ZombieRole.BUILDER && agent.getRole() != ZombieRole.MINER && agent.getRole() != ZombieRole.SUICIDE) {
-            cooperation.tick();
-            // 如果协作模块接管了移动（例如正在跟随），它会自行处理，不需要后续逻辑
-            // 但如果正在战斗（有目标），后续逻辑会覆盖它
+            // 有明确目标且距离不远时，减少协作重排，避免来回踱步。
+            boolean suppressCoop = targetLoc != null && z.getWorld().equals(targetLoc.getWorld())
+                && z.getLocation().distanceSquared(targetLoc) <= 20 * 20;
+            if (!suppressCoop) {
+                cooperation.tick();
+            }
         }
 
-        // 5. 信标避让 (保持不变)
-        if (agent.checkAndResetSkillCooldown("BEACON_CHECK", 500)) {
-             Location nearestBeacon = BeaconManager.getInstance().getNearestActiveBeacon(z.getLocation(), 50.0);
+        // 5. 信标避让（增加滞后与战斗豁免，避免来回踱步）
+        if (agent.checkAndResetSkillCooldown("BEACON_CHECK", 650)) {
+             Location nearestBeacon = BeaconManager.getInstance().getNearestActiveBeacon(z.getLocation(), 24.0);
              if (nearestBeacon != null) {
-                 z.addPotionEffect(new org.bukkit.potion.PotionEffect(org.bukkit.potion.PotionEffectType.WEAKNESS, 40, 254));
-                 z.damage(2.5);
-                 
-                 // 逃离逻辑...
-                 Vector fleeDir = z.getLocation().toVector().subtract(nearestBeacon.toVector()).normalize();
-                 Location fleeTarget = z.getLocation().add(fleeDir.multiply(15));
-                 if (TooMuchZombies.getNMSHandler() != null) {
-                     TooMuchZombies.getNMSHandler().moveTo(z, fleeTarget, 2.0);
+                 double beaconDistSq = z.getLocation().distanceSquared(nearestBeacon);
+                 LivingEntity currentTarget = agent.getTargetEntity();
+                 boolean closeCombat = currentTarget != null
+                     && currentTarget.isValid()
+                     && currentTarget.getWorld().equals(z.getWorld())
+                     && currentTarget.getLocation().distanceSquared(z.getLocation()) <= 16.0;
+
+                 // 已经贴身交战时不强行逃离，避免 AI 在信标边缘反复横跳。
+                 if (closeCombat) {
+                     z.addPotionEffect(new org.bukkit.potion.PotionEffect(org.bukkit.potion.PotionEffectType.WEAKNESS, 40, 1));
+                 } else if (beaconDistSq <= 18.0 * 18.0) {
+                     z.addPotionEffect(new org.bukkit.potion.PotionEffect(org.bukkit.potion.PotionEffectType.WEAKNESS, 40, 2));
+                     z.damage(1.0);
+
+                     Vector fleeDir = z.getLocation().toVector().subtract(nearestBeacon.toVector()).normalize();
+                     Location fleeTarget = z.getLocation().add(fleeDir.multiply(14));
+                     if (TooMuchZombies.getNMSHandler() != null) {
+                         TooMuchZombies.getNMSHandler().moveTo(z, fleeTarget, 1.2);
+                     }
+                     return;
                  }
-                 return;
              }
         }
 
@@ -108,15 +125,15 @@ public class SmartPathingBehavior {
              Location nearestLight = LightSourceManager.getInstance().getNearestLightSource(z.getLocation(), 15.0);
              
              if (nearestLight != null) {
-                 z.addPotionEffect(new org.bukkit.potion.PotionEffect(org.bukkit.potion.PotionEffectType.SLOWNESS, 40, 0));
-                 z.addPotionEffect(new org.bukkit.potion.PotionEffect(org.bukkit.potion.PotionEffectType.WEAKNESS, 40, 0));
-                 z.addPotionEffect(new org.bukkit.potion.PotionEffect(org.bukkit.potion.PotionEffectType.GLOWING, 40, 0));
+                 z.addPotionEffect(new org.bukkit.potion.PotionEffect(org.bukkit.potion.PotionEffectType.SLOWNESS, 60, 1));
+                 z.addPotionEffect(new org.bukkit.potion.PotionEffect(org.bukkit.potion.PotionEffectType.WEAKNESS, 60, 1));
+                 z.addPotionEffect(new org.bukkit.potion.PotionEffect(org.bukkit.potion.PotionEffectType.GLOWING, 60, 0));
 
                  Vector fleeDir = z.getLocation().toVector().subtract(nearestLight.toVector()).normalize();
-                 Location fleeTarget = z.getLocation().add(fleeDir.multiply(10));
+                 Location fleeTarget = z.getLocation().add(fleeDir.multiply(12));
                  
                  if (TooMuchZombies.getNMSHandler() != null) {
-                     TooMuchZombies.getNMSHandler().moveTo(z, fleeTarget, 1.4);
+                     TooMuchZombies.getNMSHandler().moveTo(z, fleeTarget, 1.0);
                  }
                  return;
              }
@@ -147,7 +164,7 @@ public class SmartPathingBehavior {
         boolean isSpecialist = (agent.getRole() == ZombieRole.BUILDER || agent.getRole() == ZombieRole.MINER);
         
         // 增加建造意愿：专家僵尸更容易开启建筑模式，普通僵尸如果卡住较久也会尝试
-        if (isSpecialist) {
+        if (terrainModificationEnabled && isSpecialist) {
             if (agent.isStuck() || Math.random() < 0.05) { // 专家有 5% 概率主动开启建筑模式
                 builder.setActive(true);
                 builder.tick();
@@ -156,7 +173,7 @@ public class SmartPathingBehavior {
         }
         
         // 9. 正常移动逻辑 (Vanilla Pathfinding)
-        if (isSpecialist && agent.checkAndResetSkillCooldown("STRUCT_OBSTACLE_CHECK", 1000)) {
+        if (terrainModificationEnabled && isSpecialist && agent.checkAndResetSkillCooldown("STRUCT_OBSTACLE_CHECK", 1000)) {
             Vector flatDir = targetLoc.toVector().subtract(z.getLocation().toVector()).setY(0);
             if (flatDir.lengthSquared() < 0.01) flatDir = z.getLocation().getDirection().setY(0);
             if (flatDir.lengthSquared() > 0.01) flatDir.normalize();
@@ -178,14 +195,18 @@ public class SmartPathingBehavior {
         } else {
             // 确保没有被锁定移动
             if (!agent.isAiPaused() && z.getTarget() != null) {
-                // 让原版 AI 处理，或者显式调用 moveTo
-                // agent.moveTo(targetLoc, 1.0);
+                // 主动追击 + 节流重算，降低左右横跳。
+                double d = z.getLocation().distanceSquared(targetLoc);
+                double speed = d > 18 * 18 ? 1.2 : 1.0;
+                if (agent.checkAndResetSkillCooldown("CHASE_REPATH", 200)) {
+                    agent.moveTo(targetLoc, speed);
+                }
             }
         }
         
         // 10. 简单的障碍物处理 (Fallback for non-specialists or when builder is not active)
         // 仅处理面前的门/玻璃等脆弱物体
-        if (!builder.isActive() && isSpecialist) {
+        if (terrainModificationEnabled && !builder.isActive() && isSpecialist) {
             handleSimpleObstacle(z, targetLoc, breaker);
         }
     }
