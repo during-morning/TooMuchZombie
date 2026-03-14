@@ -96,20 +96,20 @@ spawn:
 level:
   max: 12
   threat:
-    xp-weight: 0.22
-    survival-days-weight: 0.18
-    armor-weight: 0.24
-    weapon-weight: 0.36
-    damage-weight: 0.20
-    kdr-weight: 0.16
+    xp-weight: 0.18
+    survival-days-weight: 0.12
+    armor-weight: 0.22
+    weapon-weight: 0.44
+    damage-weight: 0.26
+    kdr-weight: 0.30
   encounter:
     self-weight: 0.60
     nearby-max-weight: 0.40
     nearby-avg-weight: 0.15
     nearby-radius: 64.0
   hysteresis:
-    up-threshold: 0.55
-    down-threshold: 0.75
+    up-threshold: 0.72
+    down-threshold: 0.45
 
 breach:
   lease-ms: 4000

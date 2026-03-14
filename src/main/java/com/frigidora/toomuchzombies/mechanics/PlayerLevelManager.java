@@ -230,20 +230,23 @@ public class PlayerLevelManager {
             + cfg.getThreatKdrWeight();
         weighted = weighted / Math.max(0.0001, totalWeight);
 
-        double prev = smoothedThreat.getOrDefault(uuid, weighted);
+        // 强化等级算法分层：高威胁玩家更快进入高等级区间。
+        double boosted = Math.pow(Math.max(0.0, Math.min(1.0, weighted)), 0.70);
+
+        double prev = smoothedThreat.getOrDefault(uuid, boosted);
         double up = cfg.getHysteresisUpThreshold();
         double down = cfg.getHysteresisDownThreshold();
         double next;
 
-        if (weighted >= prev) {
-            next = prev + (weighted - prev) * up;
+        if (boosted >= prev) {
+            next = prev + (boosted - prev) * up;
         } else {
-            next = prev + (weighted - prev) * down;
+            next = prev + (boosted - prev) * down;
         }
 
         smoothedThreat.put(uuid, next);
 
-        int level = 1 + (int) Math.floor(Math.max(0.0, Math.min(0.9999, next)) * maxLevel);
+        int level = 1 + (int) Math.floor(Math.max(0.0, Math.min(0.9999, next)) * (maxLevel - 0.0001));
         int clamped = Math.max(1, Math.min(maxLevel, level));
         levelCache.put(uuid, clamped);
         levelCacheTime.put(uuid, now);
