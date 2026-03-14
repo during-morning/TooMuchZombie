@@ -49,8 +49,16 @@ public class SmartPathingBehavior {
         ZombieSuicideBehavior suicide = agent.getSuicideBehavior();
         ZombieCooperationBehavior cooperation = agent.getCooperationBehavior();
 
-        // 按当前玩法要求默认开启地形改造，保证僵尸能搭建/破坏。
-        final boolean terrainModificationEnabled = true;
+        // 按需求禁用地形改造：不铺地板、不破坏方块。
+        final boolean terrainModificationEnabled = false;
+        if (!terrainModificationEnabled) {
+            if (builder.isActive()) {
+                builder.setActive(false);
+            }
+            if (breaker.isBreaking()) {
+                breaker.stopBreaking();
+            }
+        }
 
         // 2. 自爆僵尸冲锋逻辑 (最高优先级)
         if (suicide.isActive()) {
@@ -165,7 +173,7 @@ public class SmartPathingBehavior {
         
         // 增加建造意愿：专家僵尸更容易开启建筑模式，普通僵尸如果卡住较久也会尝试
         if (terrainModificationEnabled && isSpecialist) {
-            if (agent.isStuck() || Math.random() < 0.16) { // 专家有 16% 概率主动开启建筑模式，提升破墙/搭建意愿
+            if (agent.isStuck() || Math.random() < 0.05) { // 专家有 5% 概率主动开启建筑模式
                 builder.setActive(true);
                 builder.tick();
                 return;
@@ -173,7 +181,7 @@ public class SmartPathingBehavior {
         }
         
         // 9. 正常移动逻辑 (Vanilla Pathfinding)
-        if (terrainModificationEnabled && isSpecialist && agent.checkAndResetSkillCooldown("STRUCT_OBSTACLE_CHECK", 450)) {
+        if (terrainModificationEnabled && isSpecialist && agent.checkAndResetSkillCooldown("STRUCT_OBSTACLE_CHECK", 1000)) {
             Vector flatDir = targetLoc.toVector().subtract(z.getLocation().toVector()).setY(0);
             if (flatDir.lengthSquared() < 0.01) flatDir = z.getLocation().getDirection().setY(0);
             if (flatDir.lengthSquared() > 0.01) flatDir.normalize();
@@ -195,19 +203,15 @@ public class SmartPathingBehavior {
         } else {
             // 确保没有被锁定移动
             if (!agent.isAiPaused() && z.getTarget() != null) {
-                // 主动追击 + 节流重算，降低左右横跳。
-                double d = z.getLocation().distanceSquared(targetLoc);
-                double speed = d > 18 * 18 ? 1.3 : 1.08;
-                if (agent.checkAndResetSkillCooldown("CHASE_REPATH", 150)) {
-                    agent.moveTo(targetLoc, speed);
-                }
+                // 主动追击，避免原版寻路与自定义协作行为冲突导致来回踱步。
+                agent.moveTo(targetLoc, 1.0);
             }
         }
         
         // 10. 简单的障碍物处理 (Fallback for non-specialists or when builder is not active)
         // 仅处理面前的门/玻璃等脆弱物体
-        if (terrainModificationEnabled && !builder.isActive() && agent.getRole() != ZombieRole.SUICIDE) {
-            handleSimpleObstacle(agent, targetLoc, breaker);
+        if (terrainModificationEnabled && !builder.isActive() && isSpecialist) {
+            handleSimpleObstacle(z, targetLoc, breaker);
         }
     }
 
