@@ -13,10 +13,17 @@ import org.bukkit.inventory.meta.PotionMeta;
 import org.bukkit.potion.PotionType;
 import org.bukkit.util.Vector;
 
+import com.frigidora.toomuchzombies.mechanics.BeaconManager;
+
 public class CombatBehavior {
 
     public void tick(ZombieAgent agent) {
         if (agent.getLastKnownTargetLocation() == null) return;
+
+        // 信标范围内禁止技能释放（仅保留基础追击/普攻行为）。
+        if (BeaconManager.getInstance().getNearestActiveBeacon(agent.getZombie().getLocation(), 24.0) != null) {
+            return;
+        }
         
         Location targetLoc = agent.getLastKnownTargetLocation();
         if (!agent.getZombie().getWorld().equals(targetLoc.getWorld())) return;
@@ -214,7 +221,7 @@ public class CombatBehavior {
         boolean isAdvanced = Math.random() < 0.3;
         
         tnt.setFuseTicks(isAdvanced ? 20 : 40); // 高级 TNT 爆炸更快 (1s vs 2s)
-        tnt.setYield(isAdvanced ? 4.0f : 2.5f); // 高级 TNT 威力更大 (4.0 vs 2.5)
+        tnt.setYield(0.0f); // 按需求禁用方块破坏，仅保留伤害与压制
         if (isAdvanced) {
             tnt.setGlowing(true); // 高亮显示
             tnt.setCustomName(org.bukkit.ChatColor.RED + "Advanced TNT");
