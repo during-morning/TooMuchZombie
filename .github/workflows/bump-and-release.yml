@@ -1,9 +1,6 @@
 name: Bump And Release
 
 on:
-  push:
-    branches:
-      - main
   workflow_dispatch:
     inputs:
       bump:
@@ -19,6 +16,9 @@ on:
 permissions:
   contents: write
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   bump-tag-release:
     if: github.actor != 'github-actions[bot]'
@@ -26,12 +26,12 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
       - name: Setup Java
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "21"
@@ -94,7 +94,12 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add pom.xml plugin.yml
+          if git diff --cached --quiet; then
+            echo "No version changes to commit."
+            exit 0
+          fi
           git commit -m "chore(release): v${NEXT} [skip ci]"
+          git pull --rebase origin main
           git push origin HEAD:main
 
       - name: Create And Push Tag
@@ -108,3 +113,14 @@ jobs:
           fi
           git tag "$TAG"
           git push origin "$TAG"
+
+      - name: Create GitHub Release Directly
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.ver.outputs.tag }}
+          name: ${{ steps.ver.outputs.tag }}
+          prerelease: false
+          make_latest: true
+          generate_release_notes: true
+          files: |
+            target/TooMuchZombies-*.jar
