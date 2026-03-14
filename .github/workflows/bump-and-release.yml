@@ -1,9 +1,6 @@
 name: Bump And Release
 
 on:
-  push:
-    branches:
-      - main
   workflow_dispatch:
     inputs:
       bump:
@@ -97,7 +94,12 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add pom.xml plugin.yml
+          if git diff --cached --quiet; then
+            echo "No version changes to commit."
+            exit 0
+          fi
           git commit -m "chore(release): v${NEXT} [skip ci]"
+          git pull --rebase origin main
           git push origin HEAD:main
 
       - name: Create And Push Tag
