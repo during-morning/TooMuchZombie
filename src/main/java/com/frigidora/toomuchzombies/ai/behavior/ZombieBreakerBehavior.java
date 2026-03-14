@@ -132,7 +132,7 @@ public class ZombieBreakerBehavior {
         float damage = speed / hardness / (correctTool ? 30f : 100f);
         
         // Configurable multiplier from TooMuchZombies config
-        double configMultiplier = TooMuchZombies.getInstance().getConfig().getDouble("zombie-ai.break-speed-multiplier", 1.5);
+        double configMultiplier = TooMuchZombies.getInstance().getConfig().getDouble("zombie-ai.break-speed-multiplier", 2.4);
         
         // 等级速度加成
         float levelMultiplier = 1.0f;
@@ -151,10 +151,10 @@ public class ZombieBreakerBehavior {
 
         float finalSpeed = damage * (float) configMultiplier * levelMultiplier;
         
-        // 白天减速：速度减小 70%
+        // 白天减速：仍减速，但不再过度抑制破墙能力
         long time = zombie.getWorld().getTime();
         if (time >= 0 && time < 12000) {
-            finalSpeed *= 0.3f;
+            finalSpeed *= 0.55f;
         }
         
         return finalSpeed;

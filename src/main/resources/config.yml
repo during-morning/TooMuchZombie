@@ -9,6 +9,7 @@ zombie-ai:
   override:
     mode: hybrid
   break-speed: 1.0
+  break-speed-multiplier: 2.4
   build-speed: 1.0
   noise-threshold: 10
   terrain-modification-enabled: true

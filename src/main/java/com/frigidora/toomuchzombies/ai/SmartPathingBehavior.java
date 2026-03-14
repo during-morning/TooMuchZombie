@@ -215,7 +215,8 @@ public class SmartPathingBehavior {
         }
     }
 
-    private void handleSimpleObstacle(Zombie z, Location targetLoc, ZombieBreakerBehavior breaker) {
+    private void handleSimpleObstacle(ZombieAgent agent, Location targetLoc, ZombieBreakerBehavior breaker) {
+        Zombie z = agent.getZombie();
         // 简单的障碍物检查
         Vector toTargetDir = targetLoc.toVector().subtract(z.getLocation().toVector()).setY(0);
         if (toTargetDir.lengthSquared() > 0.01) toTargetDir.normalize();
@@ -232,7 +233,7 @@ public class SmartPathingBehavior {
 
             for (Block b : new Block[]{blockAheadFeet, blockAheadHead}) {
                 if (b.getType() == Material.AIR) continue;
-                if (isFragile(b.getType()) || isWooden(b.getType())) {
+                if (isBreakCandidate(agent, b.getType()) && breaker.canBreak(b)) {
                     breaker.startBreaking(b);
                     return;
                 }
@@ -297,6 +298,26 @@ public class SmartPathingBehavior {
         }
     }
     
+
+    private boolean isBreakCandidate(ZombieAgent agent, Material material) {
+        if (isFragile(material) || isWooden(material)) {
+            return true;
+        }
+
+        String name = material.name();
+        boolean isHardWall = name.contains("STONE") || name.contains("BRICK") || name.contains("COBBLE")
+            || name.contains("TERRACOTTA") || name.contains("CONCRETE") || name.contains("DEEPSLATE");
+
+        if (!isHardWall) {
+            return false;
+        }
+
+        // 专家僵尸总是愿意拆硬质墙体；普通战斗僵尸在卡住时也会尝试。
+        if (agent.getRole() == ZombieRole.BUILDER || agent.getRole() == ZombieRole.MINER) {
+            return true;
+        }
+        return agent.isStuck();
+    }
     private boolean isFragile(Material material) {
         String name = material.name();
         // 移除 DIRT/GRASS_BLOCK，因为需求说 "僵尸无法空手破坏泥土等" (移除特性「破坏」)
