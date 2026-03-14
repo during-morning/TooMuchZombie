@@ -82,12 +82,6 @@ public class LightSourceManager {
     }
 
     private boolean isLightBlock(ItemStack item) {
-        if (item == null || item.getType() != Material.LIGHT) return false;
-        
-        org.bukkit.inventory.meta.ItemMeta meta = item.getItemMeta();
-        if (meta != null && meta.hasDisplayName()) {
-            String displayName = meta.getDisplayName();
-        }
-        return false;
+        return item != null && item.getType() == Material.LIGHT;
     }
 }
