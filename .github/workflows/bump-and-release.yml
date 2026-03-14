@@ -113,3 +113,14 @@ jobs:
           fi
           git tag "$TAG"
           git push origin "$TAG"
+
+      - name: Create GitHub Release Directly
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.ver.outputs.tag }}
+          name: ${{ steps.ver.outputs.tag }}
+          prerelease: false
+          make_latest: true
+          generate_release_notes: true
+          files: |
+            target/TooMuchZombies-*.jar
