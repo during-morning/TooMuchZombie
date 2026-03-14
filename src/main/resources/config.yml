@@ -86,10 +86,10 @@ spawn:
   mspt-threshold: 45
   algorithm:
     enabled: true
-    chunk-cooldown-ms: 1200
-    max-global-zombies: 1600
-    max-near-player: 28
-    spawn-budget-per-player: 8
+    chunk-cooldown-ms: 800
+    max-global-zombies: 1800
+    max-near-player: 32
+    spawn-budget-per-player: 10
     accept-chance: 1.0
     enforce-night-only: true
 

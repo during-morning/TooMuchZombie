@@ -418,14 +418,14 @@ public class ZombieFactory {
         int lv = Math.max(1, Math.min(maxLevel, level));
         double t = (lv - 1.0) / Math.max(1.0, maxLevel - 1.0);
 
-        double health = 18.0 + Math.pow(t, 1.60) * 260.0;
+        double health = 18.0 + Math.pow(t, 1.45) * 190.0;
         if (lv <= 4) {
             health *= (0.90 + RANDOM.nextDouble() * 0.20);
         }
 
         if (zombie.getAttribute(Attribute.GENERIC_MAX_HEALTH) != null) {
-            zombie.getAttribute(Attribute.GENERIC_MAX_HEALTH).setBaseValue(Math.min(320.0, health));
-            zombie.setHealth(Math.min(zombie.getAttribute(Attribute.GENERIC_MAX_HEALTH).getValue(), Math.min(320.0, health)));
+            zombie.getAttribute(Attribute.GENERIC_MAX_HEALTH).setBaseValue(Math.min(260.0, health));
+            zombie.setHealth(Math.min(zombie.getAttribute(Attribute.GENERIC_MAX_HEALTH).getValue(), Math.min(260.0, health)));
         }
 
         if (zombie.getAttribute(Attribute.GENERIC_ATTACK_DAMAGE) != null) {
