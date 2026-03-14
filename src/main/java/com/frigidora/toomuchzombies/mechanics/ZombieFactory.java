@@ -142,16 +142,23 @@ public class ZombieFactory {
             return false;
         }
 
-        int nearby = 0;
+        int nearbyManaged = 0;
         for (Entity e : nearest.getNearbyEntities(64, 64, 64)) {
-            if (e instanceof Zombie) nearby++;
+            if (e instanceof Zombie z) {
+                if (ZombieAIManager.getInstance().getAgent(z.getUniqueId()) != null) {
+                    nearbyManaged++;
+                }
+            }
         }
-        if (nearby >= cfg.getSpawnMaxNearPlayer()) {
+
+        // 只用插件管理僵尸参与配额判定，避免被原版自然僵尸误伤配额。
+        if (nearbyManaged >= cfg.getSpawnMaxNearPlayer()) {
             reject("near_player_cap");
             return false;
         }
 
-        if (nearby >= cfg.getSpawnBudgetPerPlayer() * Math.max(1, loc.getWorld().getPlayers().size())) {
+        // 预算按“每个玩家附近”判定，不再乘以世界人数，避免单玩家场景被过早限制。
+        if (nearbyManaged >= cfg.getSpawnBudgetPerPlayer()) {
             reject("budget");
             return false;
         }

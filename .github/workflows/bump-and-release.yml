@@ -37,13 +37,20 @@ jobs:
           java-version: "21"
           cache: maven
 
-      - name: Resolve Next Version
+      - name: Resolve Next Version From Latest Tag
         id: ver
         shell: bash
         run: |
           set -euo pipefail
-          CURRENT="$(mvn help:evaluate -Dexpression=project.version -q -DforceStdout)"
-          CURRENT="${CURRENT%-SNAPSHOT}"
+
+          LATEST_TAG="$(git tag -l 'v*' --sort=-v:refname | head -n 1 || true)"
+          if [ -n "$LATEST_TAG" ]; then
+            CURRENT="${LATEST_TAG#v}"
+          else
+            CURRENT="$(mvn help:evaluate -Dexpression=project.version -q -DforceStdout)"
+            CURRENT="${CURRENT%-SNAPSHOT}"
+          fi
+
           IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT"
 
           BUMP="${{ github.event.inputs.bump }}"
@@ -74,14 +81,6 @@ jobs:
           echo "current=$CURRENT" >> "$GITHUB_OUTPUT"
           echo "next=$NEXT" >> "$GITHUB_OUTPUT"
           echo "tag=v$NEXT" >> "$GITHUB_OUTPUT"
-
-      - name: Update Version Files
-        shell: bash
-        run: |
-          set -euo pipefail
-          NEXT="${{ steps.ver.outputs.next }}"
-          mvn -B versions:set -DnewVersion="${NEXT}" -DgenerateBackupPoms=false
-          sed -i "s#^version: [0-9]\\+\\.[0-9]\\+\\.[0-9]\\+#version: ${NEXT}#" plugin.yml
 
       - name: Build
         run: mvn -B -DskipTests package

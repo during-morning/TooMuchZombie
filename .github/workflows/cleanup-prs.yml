@@ -1,0 +1,108 @@
+name: Cleanup Pull Requests
+
+on:
+  pull_request_target:
+    types: [opened, reopened, synchronize, ready_for_review]
+  workflow_dispatch:
+    inputs:
+      keep_pr_number:
+        description: "PR number to keep open (optional)"
+        required: false
+        type: string
+      scope:
+        description: "cleanup scope"
+        required: true
+        default: author
+        type: choice
+        options:
+          - author
+          - all
+
+permissions:
+  contents: read
+  pull-requests: write
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Close duplicate PRs and keep one
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+
+            const isManual = context.eventName === 'workflow_dispatch';
+            const keepInput = core.getInput('keep_pr_number')?.trim();
+            const scopeInput = (core.getInput('scope') || 'author').trim();
+
+            const openPrs = await github.paginate(github.rest.pulls.list, {
+              owner,
+              repo,
+              state: 'open',
+              per_page: 100,
+            });
+
+            if (openPrs.length <= 1) {
+              core.info(`Open PR count is ${openPrs.length}; nothing to close.`);
+              return;
+            }
+
+            let keep = null;
+            if (keepInput) {
+              const keepNumber = Number.parseInt(keepInput, 10);
+              if (!Number.isFinite(keepNumber)) {
+                core.setFailed(`Invalid keep_pr_number: ${keepInput}`);
+                return;
+              }
+              keep = openPrs.find(pr => pr.number === keepNumber);
+              if (!keep) {
+                core.setFailed(`PR #${keepNumber} is not open or not found.`);
+                return;
+              }
+            } else if (!isManual && context.payload.pull_request) {
+              keep = openPrs.find(pr => pr.number === context.payload.pull_request.number) || null;
+            }
+
+            if (!keep) {
+              keep = [...openPrs].sort((a, b) => {
+                const ad = new Date(a.updated_at).getTime();
+                const bd = new Date(b.updated_at).getTime();
+                return bd - ad;
+              })[0];
+            }
+
+            core.info(`Keeping PR #${keep.number}: ${keep.title}`);
+
+            let candidates = openPrs.filter(pr => pr.number !== keep.number);
+
+            // 默认按作者维度清理：自动事件下只清理“与当前保留 PR 同作者”的重复 PR。
+            if ((isManual ? scopeInput : 'author') === 'author') {
+              const keepAuthor = keep.user?.login;
+              candidates = candidates.filter(pr => pr.user?.login === keepAuthor);
+            }
+
+            if (candidates.length === 0) {
+              core.info('No duplicate PRs matched cleanup scope.');
+              return;
+            }
+
+            for (const pr of candidates) {
+              core.info(`Closing PR #${pr.number}: ${pr.title}`);
+              await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number: pr.number,
+                body: `Closing duplicate PR to keep one active PR thread. Tracking in #${keep.number}.`,
+              });
+              await github.rest.pulls.update({
+                owner,
+                repo,
+                pull_number: pr.number,
+                state: 'closed',
+              });
+            }
