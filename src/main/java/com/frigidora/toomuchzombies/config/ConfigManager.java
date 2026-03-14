@@ -269,7 +269,7 @@ public class ConfigManager {
     }
 
     public int getSpawnBudgetPerPlayer() {
-        return clampInt(config.getInt("spawn.algorithm.spawn-budget-per-player", 4), 1, 20);
+        return clampInt(config.getInt("spawn.algorithm.spawn-budget-per-player", 4), 1, 200);
     }
 
     public double getSpawnAcceptChance() {

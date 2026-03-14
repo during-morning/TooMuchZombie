@@ -84,13 +84,6 @@ public class ZombieBreakerBehavior {
         if (currentTarget == null) return;
         refreshBreakRulesIfNeeded();
 
-        if (agent.getRole() != com.frigidora.toomuchzombies.enums.ZombieRole.BUILDER &&
-            agent.getRole() != com.frigidora.toomuchzombies.enums.ZombieRole.MINER) {
-            hitReject("role_forbidden");
-            stopBreaking();
-            return;
-        }
-        
         // Validation
         if (currentTarget.getType() == Material.AIR || currentTarget.getType() == Material.BEDROCK) {
             hitReject("invalid_target");
@@ -105,14 +98,14 @@ public class ZombieBreakerBehavior {
         }
 
         // 信标保护检查：禁止在活跃信标 50 格内破坏方块
-        if (com.frigidora.toomuchzombies.mechanics.BeaconManager.getInstance().isNearActiveBeacon(currentTarget.getLocation(), 50.0)) {
+        if (com.frigidora.toomuchzombies.mechanics.BeaconManager.getInstance().isNearActiveBeacon(currentTarget.getLocation(), 20.0)) {
             hitReject("beacon_protected");
             stopBreaking();
             return;
         }
         
-        // 距离检查：缩小到 2.5 格 (距离平方 6.25)
-        if (!zombie.getWorld().equals(currentTarget.getWorld()) || zombie.getLocation().distanceSquared(currentTarget.getLocation().add(0.5, 0.5, 0.5)) > 6.25) { 
+        // 距离检查：放宽到 3.8 格，提升破墙持续性
+        if (!zombie.getWorld().equals(currentTarget.getWorld()) || zombie.getLocation().distanceSquared(currentTarget.getLocation().add(0.5, 0.5, 0.5)) > 14.44) { 
             hitReject("out_of_range");
             stopBreaking();
             return;
@@ -124,7 +117,7 @@ public class ZombieBreakerBehavior {
         // 协作加成：检查有多少其他僵尸也在挖这个方块
         int miners = ZombieAIManager.getInstance().getMinersOnBlock(currentTarget.getLocation());
         if (miners > 1) {
-            speed *= (1.0f + (miners - 1) * 0.5f); // 每多一个僵尸，速度增加 50%
+            speed *= Math.min(4.0f, (1.0f + (miners - 1) * 0.65f)); // 每多一个僵尸，速度增加 65%，并设置上限
         }
         
         breakProgress += speed;
@@ -204,7 +197,7 @@ public class ZombieBreakerBehavior {
         float damage = speed / hardness / (correctTool ? 30f : 100f);
         
         // Configurable multiplier from TooMuchZombies config
-        double configMultiplier = TooMuchZombies.getInstance().getConfig().getDouble("zombie-ai.break-speed-multiplier", 1.5);
+        double configMultiplier = TooMuchZombies.getInstance().getConfig().getDouble("zombie-ai.break-speed-multiplier", 2.4);
         
         // 等级速度加成
         float levelMultiplier = 1.0f;
@@ -223,10 +216,10 @@ public class ZombieBreakerBehavior {
 
         float finalSpeed = damage * (float) configMultiplier * levelMultiplier;
         
-        // 白天减速：速度减小 70%
+        // 白天减速：仍减速，但不再过度抑制破墙能力
         long time = zombie.getWorld().getTime();
         if (time >= 0 && time < 12000) {
-            finalSpeed *= 0.3f;
+            finalSpeed *= 0.55f;
         }
         
         return finalSpeed;

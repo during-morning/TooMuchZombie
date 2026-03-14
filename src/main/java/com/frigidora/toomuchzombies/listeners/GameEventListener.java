@@ -495,9 +495,9 @@ public class GameEventListener implements Listener {
         
         // 生成概率
         double spawnChance;
-        if (lv <= 1) spawnChance = 0.10;
+        if (lv <= 1) spawnChance = 0.20;
         else if (lv >= maxLevel) spawnChance = 1.00;
-        else spawnChance = 0.10 + (lv - 1) * (0.90 / Math.max(1, maxLevel - 1));
+        else spawnChance = 0.20 + Math.pow((lv - 1.0) / Math.max(1.0, (maxLevel - 1.0)), 0.65) * 0.80;
 
         if (random.nextDouble() > spawnChance) {
             if (event != null) event.setCancelled(true);
@@ -523,19 +523,26 @@ public class GameEventListener implements Listener {
     }
 
     private void addZombieDrops(EntityDeathEvent event, Zombie zombie, int level) {
-        double ironChance = Math.min(0.30, 0.08 + 0.02 * level);
-        double goldChance = Math.min(0.22, 0.05 + 0.015 * level);
-        double gunpowderChance = Math.min(0.18, 0.03 + 0.01 * level);
-        double boneMealChance = Math.min(0.35, 0.10 + 0.02 * level);
-        double spiderEyeChance = Math.min(0.15, 0.03 + 0.01 * level);
-        double bookChance = Math.min(0.12, 0.02 + 0.01 * level);
-        double gearChance = Math.min(0.18, 0.02 + 0.02 * level);
+        double ironChance = Math.min(0.65, 0.10 + 0.035 * level);
+        double goldChance = Math.min(0.45, 0.06 + 0.025 * level);
+        double gunpowderChance = Math.min(0.35, 0.04 + 0.018 * level);
+        double boneMealChance = Math.min(0.70, 0.14 + 0.035 * level);
+        double spiderEyeChance = Math.min(0.32, 0.03 + 0.018 * level);
+        double bookChance = Math.min(0.30, 0.02 + 0.02 * level);
+        double gearChance = Math.min(0.45, 0.03 + 0.03 * level);
 
-        if (random.nextDouble() < ironChance) event.getDrops().add(new ItemStack(Material.IRON_INGOT, 1 + random.nextInt(2)));
-        if (random.nextDouble() < goldChance) event.getDrops().add(new ItemStack(Material.GOLD_INGOT, 1));
-        if (random.nextDouble() < gunpowderChance) event.getDrops().add(new ItemStack(Material.GUNPOWDER, 1));
-        if (random.nextDouble() < boneMealChance) event.getDrops().add(new ItemStack(Material.BONE_MEAL, 1 + random.nextInt(3)));
-        if (random.nextDouble() < spiderEyeChance) event.getDrops().add(new ItemStack(Material.SPIDER_EYE, 1));
+        if (random.nextDouble() < ironChance) event.getDrops().add(new ItemStack(Material.IRON_INGOT, 1 + random.nextInt(1 + Math.max(1, level / 4))));
+        if (random.nextDouble() < goldChance) event.getDrops().add(new ItemStack(Material.GOLD_INGOT, 1 + random.nextInt(Math.max(1, level / 6))));
+        if (random.nextDouble() < gunpowderChance) event.getDrops().add(new ItemStack(Material.GUNPOWDER, 1 + (level >= 8 ? random.nextInt(2) : 0)));
+        if (random.nextDouble() < boneMealChance) event.getDrops().add(new ItemStack(Material.BONE_MEAL, 1 + random.nextInt(2 + Math.max(1, level / 5))));
+        if (random.nextDouble() < spiderEyeChance) event.getDrops().add(new ItemStack(Material.SPIDER_EYE, 1 + (level >= 10 ? 1 : 0)));
+
+        if (level >= 9 && random.nextDouble() < 0.25) {
+            event.getDrops().add(new ItemStack(Material.EMERALD, 1 + random.nextInt(2)));
+        }
+        if (level >= 11 && random.nextDouble() < 0.18) {
+            event.getDrops().add(new ItemStack(Material.DIAMOND, 1));
+        }
 
         if (random.nextDouble() < bookChance) {
             ItemStack book = new ItemStack(Material.ENCHANTED_BOOK);
