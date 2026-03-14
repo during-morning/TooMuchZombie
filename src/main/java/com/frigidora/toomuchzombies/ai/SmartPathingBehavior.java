@@ -49,8 +49,16 @@ public class SmartPathingBehavior {
         ZombieSuicideBehavior suicide = agent.getSuicideBehavior();
         ZombieCooperationBehavior cooperation = agent.getCooperationBehavior();
 
-        // 按当前玩法要求默认开启地形改造，保证僵尸能搭建/破坏。
-        final boolean terrainModificationEnabled = true;
+        // 按需求禁用地形改造：不铺地板、不破坏方块。
+        final boolean terrainModificationEnabled = false;
+        if (!terrainModificationEnabled) {
+            if (builder.isActive()) {
+                builder.setActive(false);
+            }
+            if (breaker.isBreaking()) {
+                breaker.stopBreaking();
+            }
+        }
 
         // 2. 自爆僵尸冲锋逻辑 (最高优先级)
         if (suicide.isActive()) {
@@ -165,7 +173,7 @@ public class SmartPathingBehavior {
         
         // 增加建造意愿：专家僵尸更容易开启建筑模式，普通僵尸如果卡住较久也会尝试
         if (terrainModificationEnabled && isSpecialist) {
-            if (agent.isStuck() || Math.random() < 0.16) { // 专家有 16% 概率主动开启建筑模式，提升破墙/搭建意愿
+            if (agent.isStuck() || Math.random() < 0.05) { // 专家有 5% 概率主动开启建筑模式
                 builder.setActive(true);
                 builder.tick();
                 return;
@@ -173,7 +181,7 @@ public class SmartPathingBehavior {
         }
         
         // 9. 正常移动逻辑 (Vanilla Pathfinding)
-        if (terrainModificationEnabled && isSpecialist && agent.checkAndResetSkillCooldown("STRUCT_OBSTACLE_CHECK", 450)) {
+        if (terrainModificationEnabled && isSpecialist && agent.checkAndResetSkillCooldown("STRUCT_OBSTACLE_CHECK", 1000)) {
             Vector flatDir = targetLoc.toVector().subtract(z.getLocation().toVector()).setY(0);
             if (flatDir.lengthSquared() < 0.01) flatDir = z.getLocation().getDirection().setY(0);
             if (flatDir.lengthSquared() > 0.01) flatDir.normalize();
@@ -195,29 +203,20 @@ public class SmartPathingBehavior {
         } else {
             // 确保没有被锁定移动
             if (!agent.isAiPaused() && z.getTarget() != null) {
-                // 主动追击 + 节流重算，降低左右横跳。
-                double d = z.getLocation().distanceSquared(targetLoc);
-                double speed = d > 18 * 18 ? 1.3 : 1.08;
-                if (agent.checkAndResetSkillCooldown("CHASE_REPATH", 150)) {
-                    agent.moveTo(targetLoc, speed);
-                }
+                // 主动追击，避免原版寻路与自定义协作行为冲突导致来回踱步。
+                agent.moveTo(targetLoc, 1.0);
             }
         }
         
         // 10. 简单的障碍物处理 (Fallback for non-specialists or when builder is not active)
         // 仅处理面前的门/玻璃等脆弱物体
-        if (terrainModificationEnabled && !builder.isActive() && agent.getRole() != ZombieRole.SUICIDE) {
-            handleSimpleObstacle(z, targetLoc, breaker, isSpecialist, agent.isStuck());
+        if (terrainModificationEnabled && !builder.isActive() && isSpecialist) {
+            handleSimpleObstacle(z, targetLoc, breaker);
         }
     }
 
-    // 兼容旧签名，避免历史分支/缓存编译时出现 Zombie 与 ZombieAgent 参数不匹配
     private void handleSimpleObstacle(ZombieAgent agent, Location targetLoc, ZombieBreakerBehavior breaker) {
-        boolean isSpecialist = (agent.getRole() == ZombieRole.BUILDER || agent.getRole() == ZombieRole.MINER);
-        handleSimpleObstacle(agent.getZombie(), targetLoc, breaker, isSpecialist, agent.isStuck());
-    }
-
-    private void handleSimpleObstacle(Zombie z, Location targetLoc, ZombieBreakerBehavior breaker, boolean isSpecialist, boolean isStuck) {
+        Zombie z = agent.getZombie();
         // 简单的障碍物检查
         Vector toTargetDir = targetLoc.toVector().subtract(z.getLocation().toVector()).setY(0);
         if (toTargetDir.lengthSquared() > 0.01) toTargetDir.normalize();
@@ -234,7 +233,7 @@ public class SmartPathingBehavior {
 
             for (Block b : new Block[]{blockAheadFeet, blockAheadHead}) {
                 if (b.getType() == Material.AIR) continue;
-                if (isBreakCandidate(isSpecialist, isStuck, b.getType()) && breaker.canBreak(b)) {
+                if (isBreakCandidate(agent, b.getType()) && breaker.canBreak(b)) {
                     breaker.startBreaking(b);
                     return;
                 }
@@ -300,7 +299,7 @@ public class SmartPathingBehavior {
     }
     
 
-    private boolean isBreakCandidate(boolean isSpecialist, boolean isStuck, Material material) {
+    private boolean isBreakCandidate(ZombieAgent agent, Material material) {
         if (isFragile(material) || isWooden(material)) {
             return true;
         }
@@ -314,10 +313,10 @@ public class SmartPathingBehavior {
         }
 
         // 专家僵尸总是愿意拆硬质墙体；普通战斗僵尸在卡住时也会尝试。
-        if (isSpecialist) {
+        if (agent.getRole() == ZombieRole.BUILDER || agent.getRole() == ZombieRole.MINER) {
             return true;
         }
-        return isStuck;
+        return agent.isStuck();
     }
     private boolean isFragile(Material material) {
         String name = material.name();
