@@ -142,16 +142,23 @@ public class ZombieFactory {
             return false;
         }
 
-        int nearby = 0;
+        int nearbyManaged = 0;
         for (Entity e : nearest.getNearbyEntities(64, 64, 64)) {
-            if (e instanceof Zombie) nearby++;
+            if (e instanceof Zombie z) {
+                if (ZombieAIManager.getInstance().getAgent(z.getUniqueId()) != null) {
+                    nearbyManaged++;
+                }
+            }
         }
-        if (nearby >= cfg.getSpawnMaxNearPlayer()) {
+
+        // 只用插件管理僵尸参与配额判定，避免被原版自然僵尸误伤配额。
+        if (nearbyManaged >= cfg.getSpawnMaxNearPlayer()) {
             reject("near_player_cap");
             return false;
         }
 
-        if (nearby >= cfg.getSpawnBudgetPerPlayer() * Math.max(1, loc.getWorld().getPlayers().size())) {
+        // 预算按“每个玩家附近”判定，不再乘以世界人数，避免单玩家场景被过早限制。
+        if (nearbyManaged >= cfg.getSpawnBudgetPerPlayer()) {
             reject("budget");
             return false;
         }
@@ -418,27 +425,28 @@ public class ZombieFactory {
         int lv = Math.max(1, Math.min(maxLevel, level));
         double t = (lv - 1.0) / Math.max(1.0, maxLevel - 1.0);
 
-        double health = 20.0 + Math.pow(t, 1.25) * 900.0;
+        // 大幅降低血量曲线：提升刷怪压力时降低单体耐久，减轻“太肉”体验
+        double health = 12.0 + Math.pow(t, 1.25) * 95.0;
         if (lv <= 4) {
-            health *= (0.85 + RANDOM.nextDouble() * 0.30);
+            health *= (0.90 + RANDOM.nextDouble() * 0.20);
         }
 
         if (zombie.getAttribute(Attribute.GENERIC_MAX_HEALTH) != null) {
-            zombie.getAttribute(Attribute.GENERIC_MAX_HEALTH).setBaseValue(Math.min(1024.0, health));
-            zombie.setHealth(Math.min(zombie.getAttribute(Attribute.GENERIC_MAX_HEALTH).getValue(), Math.min(1024.0, health)));
+            zombie.getAttribute(Attribute.GENERIC_MAX_HEALTH).setBaseValue(Math.min(120.0, health));
+            zombie.setHealth(Math.min(zombie.getAttribute(Attribute.GENERIC_MAX_HEALTH).getValue(), Math.min(120.0, health)));
         }
 
         if (zombie.getAttribute(Attribute.GENERIC_ATTACK_DAMAGE) != null) {
-            zombie.getAttribute(Attribute.GENERIC_ATTACK_DAMAGE).setBaseValue(3.0 + t * 12.0);
+            zombie.getAttribute(Attribute.GENERIC_ATTACK_DAMAGE).setBaseValue(2.2 + Math.pow(t, 1.35) * 10.0);
         }
         if (zombie.getAttribute(Attribute.GENERIC_MOVEMENT_SPEED) != null) {
             zombie.getAttribute(Attribute.GENERIC_MOVEMENT_SPEED).setBaseValue(0.23 + t * 0.12);
         }
         if (zombie.getAttribute(Attribute.GENERIC_ARMOR) != null) {
-            zombie.getAttribute(Attribute.GENERIC_ARMOR).setBaseValue(1.0 + t * 14.0);
+            zombie.getAttribute(Attribute.GENERIC_ARMOR).setBaseValue(0.3 + Math.pow(t, 1.30) * 9.0);
         }
         if (zombie.getAttribute(Attribute.GENERIC_ARMOR_TOUGHNESS) != null) {
-            zombie.getAttribute(Attribute.GENERIC_ARMOR_TOUGHNESS).setBaseValue(t * 8.0);
+            zombie.getAttribute(Attribute.GENERIC_ARMOR_TOUGHNESS).setBaseValue(Math.pow(t, 1.20) * 5.0);
         }
         if (zombie.getAttribute(Attribute.GENERIC_KNOCKBACK_RESISTANCE) != null) {
             zombie.getAttribute(Attribute.GENERIC_KNOCKBACK_RESISTANCE).setBaseValue(Math.min(1.0, t * 0.95));

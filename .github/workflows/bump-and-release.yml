@@ -1,9 +1,6 @@
 name: Bump And Release
 
 on:
-  push:
-    branches:
-      - main
   workflow_dispatch:
     inputs:
       bump:
@@ -19,6 +16,9 @@ on:
 permissions:
   contents: write
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   bump-tag-release:
     if: github.actor != 'github-actions[bot]'
@@ -26,24 +26,31 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
       - name: Setup Java
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "21"
           cache: maven
 
-      - name: Resolve Next Version
+      - name: Resolve Next Version From Latest Tag
         id: ver
         shell: bash
         run: |
           set -euo pipefail
-          CURRENT="$(mvn help:evaluate -Dexpression=project.version -q -DforceStdout)"
-          CURRENT="${CURRENT%-SNAPSHOT}"
+
+          LATEST_TAG="$(git tag -l 'v*' --sort=-v:refname | head -n 1 || true)"
+          if [ -n "$LATEST_TAG" ]; then
+            CURRENT="${LATEST_TAG#v}"
+          else
+            CURRENT="$(mvn help:evaluate -Dexpression=project.version -q -DforceStdout)"
+            CURRENT="${CURRENT%-SNAPSHOT}"
+          fi
+
           IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT"
 
           BUMP="${{ github.event.inputs.bump }}"
@@ -75,29 +82,10 @@ jobs:
           echo "next=$NEXT" >> "$GITHUB_OUTPUT"
           echo "tag=v$NEXT" >> "$GITHUB_OUTPUT"
 
-      - name: Update Version Files
-        shell: bash
-        run: |
-          set -euo pipefail
-          NEXT="${{ steps.ver.outputs.next }}"
-          mvn -B versions:set -DnewVersion="${NEXT}" -DgenerateBackupPoms=false
-          sed -i "s#^version: [0-9]\\+\\.[0-9]\\+\\.[0-9]\\+#version: ${NEXT}#" plugin.yml
-
       - name: Build
         run: mvn -B -DskipTests package
 
-      - name: Commit And Push Version Bump
-        shell: bash
-        run: |
-          set -euo pipefail
-          NEXT="${{ steps.ver.outputs.next }}"
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add pom.xml plugin.yml
-          git commit -m "chore(release): v${NEXT} [skip ci]"
-          git push origin HEAD:main
-
-      - name: Create And Push Tag
+      - name: Create And Push Tag (no version-file commit)
         shell: bash
         run: |
           set -euo pipefail
@@ -108,3 +96,14 @@ jobs:
           fi
           git tag "$TAG"
           git push origin "$TAG"
+
+      - name: Create GitHub Release Directly
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.ver.outputs.tag }}
+          name: ${{ steps.ver.outputs.tag }}
+          prerelease: false
+          make_latest: true
+          generate_release_notes: true
+          files: |
+            target/TooMuchZombies-*.jar
