@@ -167,7 +167,7 @@ public class ZombieFactory {
         String key = chunkKey(loc.getChunk());
         long now = System.currentTimeMillis();
         Long last = chunkCooldowns.get(key);
-        int cooldownMs = cfg.getSpawnChunkCooldownMs();
+        long cooldownMs = cfg.getSpawnChunkCooldownMs();
         if (last != null && now - last < cooldownMs) {
             // 冷却后半段允许少量提前通过，降低“刷怪节奏过慢”的体感。
             if (now - last < cooldownMs / 2L || RANDOM.nextDouble() < 0.65) {
