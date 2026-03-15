@@ -137,13 +137,13 @@ public class ZombieFactory {
             }
         }
 
-        if (nearest == null || nearestDistSq > 96 * 96) {
+        if (nearest == null || nearestDistSq > 128 * 128) {
             reject("no_player_near");
             return false;
         }
 
         int nearbyManaged = 0;
-        for (Entity e : nearest.getNearbyEntities(96, 96, 96)) {
+        for (Entity e : nearest.getNearbyEntities(72, 72, 72)) {
             if (e instanceof Zombie z) {
                 if (ZombieAIManager.getInstance().getAgent(z.getUniqueId()) != null) {
                     nearbyManaged++;
@@ -158,7 +158,8 @@ public class ZombieFactory {
         }
 
         // 预算按“每个玩家附近”判定，不再乘以世界人数，避免单玩家场景被过早限制。
-        if (nearbyManaged >= cfg.getSpawnBudgetPerPlayer()) {
+        int relaxedBudget = Math.max(1, cfg.getSpawnBudgetPerPlayer()) * 3;
+        if (nearbyManaged >= relaxedBudget) {
             reject("budget");
             return false;
         }
@@ -166,9 +167,13 @@ public class ZombieFactory {
         String key = chunkKey(loc.getChunk());
         long now = System.currentTimeMillis();
         Long last = chunkCooldowns.get(key);
-        if (last != null && now - last < cfg.getSpawnChunkCooldownMs()) {
-            reject("chunk_cooldown");
-            return false;
+        long cooldownMs = cfg.getSpawnChunkCooldownMs();
+        if (last != null && now - last < cooldownMs) {
+            // 冷却后半段允许少量提前通过，降低“刷怪节奏过慢”的体感。
+            if (now - last < cooldownMs / 2L || RANDOM.nextDouble() < 0.65) {
+                reject("chunk_cooldown");
+                return false;
+            }
         }
 
         if (RANDOM.nextDouble() > cfg.getSpawnAcceptChance()) {
@@ -425,7 +430,7 @@ public class ZombieFactory {
         int lv = Math.max(1, Math.min(maxLevel, level));
         double t = (lv - 1.0) / Math.max(1.0, maxLevel - 1.0);
 
-        double health = 14.0 + Math.pow(t, 1.08) * 70.0;
+        double health = (14.0 + Math.pow(t, 1.08) * 70.0) * 0.4;
         if (lv <= 4) {
             health *= (0.90 + RANDOM.nextDouble() * 0.20);
         }
