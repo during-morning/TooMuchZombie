@@ -93,7 +93,7 @@ public class GameEventListener implements Listener {
 
         // 检查硬上限 (全局: 2000)
         // 如果是血月，上限翻倍 (4000)
-        int globalLimit = isBloodMoon ? 4000 : 2000;
+        int globalLimit = isBloodMoon ? 6000 : 3000;
         if (ZombieAIManager.getInstance().getZombieCount() >= globalLimit) {
             if (entity instanceof Zombie || 
                 entity instanceof AbstractSkeleton || 
@@ -109,7 +109,7 @@ public class GameEventListener implements Listener {
         
         // 限制单玩家周围僵尸数量 (100)
         // 血月翻倍 (200)
-        int perPlayerLimit = isBloodMoon ? 200 : 100;
+        int perPlayerLimit = isBloodMoon ? 280 : 160;
         
         // 查找最近的玩家
         Player nearest = null;
@@ -122,9 +122,9 @@ public class GameEventListener implements Listener {
             }
         }
         
-        if (nearest != null && minDistSq < 64 * 64) { // 仅检查 64 格内的生成
+        if (nearest != null && minDistSq < 96 * 96) { // 放宽到 96 格范围内的生成
             int nearbyZombies = 0;
-            for (Entity e : nearest.getNearbyEntities(64, 64, 64)) {
+            for (Entity e : nearest.getNearbyEntities(96, 96, 96)) {
                 if (e instanceof Zombie) {
                     nearbyZombies++;
                 }
@@ -495,9 +495,9 @@ public class GameEventListener implements Listener {
         
         // 生成概率
         double spawnChance;
-        if (lv <= 1) spawnChance = 0.20;
+        if (lv <= 1) spawnChance = 0.50;
         else if (lv >= maxLevel) spawnChance = 1.00;
-        else spawnChance = 0.20 + Math.pow((lv - 1.0) / Math.max(1.0, (maxLevel - 1.0)), 0.65) * 0.80;
+        else spawnChance = 0.50 + Math.pow((lv - 1.0) / Math.max(1.0, (maxLevel - 1.0)), 0.60) * 0.50;
 
         if (random.nextDouble() > spawnChance) {
             if (event != null) event.setCancelled(true);

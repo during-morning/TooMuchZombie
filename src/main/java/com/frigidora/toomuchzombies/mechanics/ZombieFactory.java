@@ -137,13 +137,13 @@ public class ZombieFactory {
             }
         }
 
-        if (nearest == null || nearestDistSq > 64 * 64) {
+        if (nearest == null || nearestDistSq > 96 * 96) {
             reject("no_player_near");
             return false;
         }
 
         int nearbyManaged = 0;
-        for (Entity e : nearest.getNearbyEntities(64, 64, 64)) {
+        for (Entity e : nearest.getNearbyEntities(96, 96, 96)) {
             if (e instanceof Zombie z) {
                 if (ZombieAIManager.getInstance().getAgent(z.getUniqueId()) != null) {
                     nearbyManaged++;
@@ -425,7 +425,7 @@ public class ZombieFactory {
         int lv = Math.max(1, Math.min(maxLevel, level));
         double t = (lv - 1.0) / Math.max(1.0, maxLevel - 1.0);
 
-        double health = 20.0 + Math.pow(t, 1.12) * 120.0;
+        double health = 14.0 + Math.pow(t, 1.08) * 70.0;
         if (lv <= 4) {
             health *= (0.90 + RANDOM.nextDouble() * 0.20);
         }
@@ -436,7 +436,7 @@ public class ZombieFactory {
         }
 
         if (zombie.getAttribute(Attribute.GENERIC_ATTACK_DAMAGE) != null) {
-            zombie.getAttribute(Attribute.GENERIC_ATTACK_DAMAGE).setBaseValue(2.5 + t * 7.5);
+            zombie.getAttribute(Attribute.GENERIC_ATTACK_DAMAGE).setBaseValue(6.0 + t * 18.0);
         }
         if (zombie.getAttribute(Attribute.GENERIC_MOVEMENT_SPEED) != null) {
             zombie.getAttribute(Attribute.GENERIC_MOVEMENT_SPEED).setBaseValue(0.23 + t * 0.12);
