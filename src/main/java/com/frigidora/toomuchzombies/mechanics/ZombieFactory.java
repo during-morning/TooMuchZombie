@@ -137,13 +137,13 @@ public class ZombieFactory {
             }
         }
 
-        if (nearest == null || nearestDistSq > 96 * 96) {
+        if (nearest == null || nearestDistSq > 160 * 160) {
             reject("no_player_near");
             return false;
         }
 
         int nearbyManaged = 0;
-        for (Entity e : nearest.getNearbyEntities(96, 96, 96)) {
+        for (Entity e : nearest.getNearbyEntities(56, 56, 56)) {
             if (e instanceof Zombie z) {
                 if (ZombieAIManager.getInstance().getAgent(z.getUniqueId()) != null) {
                     nearbyManaged++;
@@ -158,7 +158,8 @@ public class ZombieFactory {
         }
 
         // 预算按“每个玩家附近”判定，不再乘以世界人数，避免单玩家场景被过早限制。
-        if (nearbyManaged >= cfg.getSpawnBudgetPerPlayer()) {
+        int relaxedBudget = Math.max(1, cfg.getSpawnBudgetPerPlayer()) * 6;
+        if (nearbyManaged >= relaxedBudget) {
             reject("budget");
             return false;
         }
@@ -166,12 +167,17 @@ public class ZombieFactory {
         String key = chunkKey(loc.getChunk());
         long now = System.currentTimeMillis();
         Long last = chunkCooldowns.get(key);
-        if (last != null && now - last < cfg.getSpawnChunkCooldownMs()) {
-            reject("chunk_cooldown");
-            return false;
+        long cooldownMs = cfg.getSpawnChunkCooldownMs();
+        if (last != null && now - last < cooldownMs) {
+            // 冷却前 1/4 继续严格限制，后续阶段大幅放宽拒绝概率以提升刷怪节奏。
+            if (now - last < cooldownMs / 4L || RANDOM.nextDouble() < 0.35) {
+                reject("chunk_cooldown");
+                return false;
+            }
         }
 
-        if (RANDOM.nextDouble() > cfg.getSpawnAcceptChance()) {
+        double effectiveAcceptChance = Math.max(cfg.getSpawnAcceptChance(), 0.96);
+        if (RANDOM.nextDouble() > effectiveAcceptChance) {
             reject("accept_rate");
             return false;
         }
@@ -425,7 +431,7 @@ public class ZombieFactory {
         int lv = Math.max(1, Math.min(maxLevel, level));
         double t = (lv - 1.0) / Math.max(1.0, maxLevel - 1.0);
 
-        double health = 14.0 + Math.pow(t, 1.08) * 70.0;
+        double health = (14.0 + Math.pow(t, 1.08) * 70.0) * 0.4;
         if (lv <= 4) {
             health *= (0.90 + RANDOM.nextDouble() * 0.20);
         }
