@@ -137,13 +137,13 @@ public class ZombieFactory {
             }
         }
 
-        if (nearest == null || nearestDistSq > 160 * 160) {
+        if (nearest == null || nearestDistSq > 128 * 128) {
             reject("no_player_near");
             return false;
         }
 
         int nearbyManaged = 0;
-        for (Entity e : nearest.getNearbyEntities(56, 56, 56)) {
+        for (Entity e : nearest.getNearbyEntities(72, 72, 72)) {
             if (e instanceof Zombie z) {
                 if (ZombieAIManager.getInstance().getAgent(z.getUniqueId()) != null) {
                     nearbyManaged++;
@@ -158,7 +158,7 @@ public class ZombieFactory {
         }
 
         // 预算按“每个玩家附近”判定，不再乘以世界人数，避免单玩家场景被过早限制。
-        int relaxedBudget = Math.max(1, cfg.getSpawnBudgetPerPlayer()) * 6;
+        int relaxedBudget = Math.max(1, cfg.getSpawnBudgetPerPlayer()) * 3;
         if (nearbyManaged >= relaxedBudget) {
             reject("budget");
             return false;
@@ -169,8 +169,8 @@ public class ZombieFactory {
         Long last = chunkCooldowns.get(key);
         long cooldownMs = cfg.getSpawnChunkCooldownMs();
         if (last != null && now - last < cooldownMs) {
-            // 冷却前 1/4 继续严格限制，后续阶段大幅放宽拒绝概率以提升刷怪节奏。
-            if (now - last < cooldownMs / 4L || RANDOM.nextDouble() < 0.35) {
+            // 冷却后半段允许少量提前通过，降低“刷怪节奏过慢”的体感。
+            if (now - last < cooldownMs / 2L || RANDOM.nextDouble() < 0.65) {
                 reject("chunk_cooldown");
                 return false;
             }
