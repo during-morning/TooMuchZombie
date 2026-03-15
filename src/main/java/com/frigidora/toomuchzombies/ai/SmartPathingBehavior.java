@@ -211,7 +211,7 @@ public class SmartPathingBehavior {
         // 10. 简单的障碍物处理 (Fallback for non-specialists or when builder is not active)
         // 仅处理面前的门/玻璃等脆弱物体
         if (terrainModificationEnabled && !builder.isActive() && isSpecialist) {
-            handleSimpleObstacle(z, targetLoc, breaker);
+            handleSimpleObstacle(agent, targetLoc, breaker);
         }
     }
 

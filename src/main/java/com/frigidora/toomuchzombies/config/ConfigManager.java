@@ -257,27 +257,27 @@ public class ConfigManager {
     }
 
     public long getSpawnChunkCooldownMs() {
-        return clampInt(config.getInt("spawn.algorithm.chunk-cooldown-ms", 3000), 0, 120000);
+        return clampInt(config.getInt("spawn.algorithm.chunk-cooldown-ms", 1200), 0, 120000);
     }
 
     public int getSpawnMaxGlobalZombies() {
-        return clampInt(config.getInt("spawn.algorithm.max-global-zombies", 2000), 10, 10000);
+        return clampInt(config.getInt("spawn.algorithm.max-global-zombies", 3000), 10, 10000);
     }
 
     public int getSpawnMaxNearPlayer() {
-        return clampInt(config.getInt("spawn.algorithm.max-near-player", 100), 1, 500);
+        return clampInt(config.getInt("spawn.algorithm.max-near-player", 160), 1, 500);
     }
 
     public int getSpawnBudgetPerPlayer() {
-        return clampInt(config.getInt("spawn.algorithm.spawn-budget-per-player", 4), 1, 200);
+        return clampInt(config.getInt("spawn.algorithm.spawn-budget-per-player", 6), 1, 200);
     }
 
     public double getSpawnAcceptChance() {
-        return clampDouble(config.getDouble("spawn.algorithm.accept-chance", 1.0), 0.0, 1.0);
+        return clampDouble(config.getDouble("spawn.algorithm.accept-chance", 0.9), 0.0, 1.0);
     }
 
     public boolean isSpawnEnforceNightOnly() {
-        return config.getBoolean("spawn.algorithm.enforce-night-only", true);
+        return config.getBoolean("spawn.algorithm.enforce-night-only", false);
     }
 
     public double getThreatXpWeight() {
