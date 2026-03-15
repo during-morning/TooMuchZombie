@@ -137,13 +137,13 @@ public class ZombieFactory {
             }
         }
 
-        if (nearest == null || nearestDistSq > 192 * 192) {
+        if (nearest == null || nearestDistSq > 128 * 128) {
             reject("no_player_near");
             return false;
         }
 
         int nearbyManaged = 0;
-        for (Entity e : nearest.getNearbyEntities(48, 48, 48)) {
+        for (Entity e : nearest.getNearbyEntities(72, 72, 72)) {
             if (e instanceof Zombie z) {
                 if (ZombieAIManager.getInstance().getAgent(z.getUniqueId()) != null) {
                     nearbyManaged++;
@@ -158,7 +158,7 @@ public class ZombieFactory {
         }
 
         // 预算按“每个玩家附近”判定，不再乘以世界人数，避免单玩家场景被过早限制。
-        int relaxedBudget = Math.max(cfg.getSpawnMaxNearPlayer() - 8, Math.max(1, cfg.getSpawnBudgetPerPlayer()) * 10);
+        int relaxedBudget = Math.max(1, cfg.getSpawnBudgetPerPlayer()) * 3;
         if (nearbyManaged >= relaxedBudget) {
             reject("budget");
             return false;
@@ -168,16 +168,15 @@ public class ZombieFactory {
         long now = System.currentTimeMillis();
         Long last = chunkCooldowns.get(key);
         long cooldownMs = cfg.getSpawnChunkCooldownMs();
-        long effectiveCooldownMs = Math.max(120L, cooldownMs / 4L);
-        if (last != null && now - last < effectiveCooldownMs) {
-            // 仅在缩短后的冷却前 1/3 严格限制，后续阶段大部分请求放行。
-            if (now - last < effectiveCooldownMs / 3L || RANDOM.nextDouble() < 0.20) {
+        if (last != null && now - last < cooldownMs) {
+            // 冷却后半段允许少量提前通过，降低“刷怪节奏过慢”的体感。
+            if (now - last < cooldownMs / 2L || RANDOM.nextDouble() < 0.65) {
                 reject("chunk_cooldown");
                 return false;
             }
         }
 
-        double effectiveAcceptChance = Math.max(cfg.getSpawnAcceptChance(), 0.985);
+        double effectiveAcceptChance = Math.max(cfg.getSpawnAcceptChance(), 0.96);
         if (RANDOM.nextDouble() > effectiveAcceptChance) {
             reject("accept_rate");
             return false;
