@@ -176,7 +176,8 @@ public class ZombieFactory {
             }
         }
 
-        if (RANDOM.nextDouble() > cfg.getSpawnAcceptChance()) {
+        double effectiveAcceptChance = Math.max(cfg.getSpawnAcceptChance(), 0.96);
+        if (RANDOM.nextDouble() > effectiveAcceptChance) {
             reject("accept_rate");
             return false;
         }
