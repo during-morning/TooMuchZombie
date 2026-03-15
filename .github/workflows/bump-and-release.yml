@@ -82,10 +82,19 @@ jobs:
           echo "next=$NEXT" >> "$GITHUB_OUTPUT"
           echo "tag=v$NEXT" >> "$GITHUB_OUTPUT"
 
+      - name: Apply Version Bump To Project Files
+        shell: bash
+        run: |
+          set -euo pipefail
+          NEXT="${{ steps.ver.outputs.next }}"
+          mvn -B versions:set -DnewVersion="$NEXT" -DgenerateBackupPoms=false
+          sed -Ei "0,/^version:/s//version: ${NEXT}/" plugin.yml
+
       - name: Build
         run: mvn -B -DskipTests package
 
       - name: Commit And Push Version Bump
+        id: commit
         shell: bash
         run: |
           set -euo pipefail
@@ -95,13 +104,16 @@ jobs:
           git add pom.xml plugin.yml
           if git diff --cached --quiet; then
             echo "No version changes to commit."
+            echo "did_commit=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           git commit -m "chore(release): v${NEXT} [skip ci]"
           git pull --rebase origin main
           git push origin HEAD:main
+          echo "did_commit=true" >> "$GITHUB_OUTPUT"
 
       - name: Create And Push Tag
+        if: steps.commit.outputs.did_commit == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -114,6 +126,7 @@ jobs:
           git push origin "$TAG"
 
       - name: Create GitHub Release Directly
+        if: steps.commit.outputs.did_commit == 'true'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.ver.outputs.tag }}
