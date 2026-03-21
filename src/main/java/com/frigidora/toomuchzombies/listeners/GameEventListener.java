@@ -517,6 +517,9 @@ public class GameEventListener implements Listener {
         else if (lv >= maxLevel) spawnChance = 1.00;
         else spawnChance = 0.50 + Math.pow((lv - 1.0) / Math.max(1.0, (maxLevel - 1.0)), 0.60) * 0.50;
 
+        // Performance tuning: keep the level-based curve, but cut total zombie throughput roughly in half.
+        spawnChance *= 0.5;
+
         if (random.nextDouble() > spawnChance) {
             if (event != null) event.setCancelled(true);
             else {
