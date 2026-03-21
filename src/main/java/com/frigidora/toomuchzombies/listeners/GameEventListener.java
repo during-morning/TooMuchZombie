@@ -19,6 +19,7 @@ import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.block.BlockBreakEvent;
 import org.bukkit.event.block.BlockPlaceEvent;
+import org.bukkit.event.entity.FoodLevelChangeEvent;
 import org.bukkit.event.entity.CreatureSpawnEvent;
 import org.bukkit.event.entity.EntityCombustEvent;
 import org.bukkit.event.entity.EntityDamageByEntityEvent;
@@ -41,6 +42,7 @@ import com.frigidora.toomuchzombies.ai.HiveMindManager;
 import com.frigidora.toomuchzombies.ai.ZombieAIManager;
 import com.frigidora.toomuchzombies.config.ConfigManager;
 import com.frigidora.toomuchzombies.enums.ZombieRole;
+import com.frigidora.toomuchzombies.mechanics.AwarenessManager;
 import com.frigidora.toomuchzombies.mechanics.ChaosManager;
 import com.frigidora.toomuchzombies.mechanics.PlayerLevelManager;
 import com.frigidora.toomuchzombies.mechanics.ZombieFactory;
@@ -48,6 +50,7 @@ import com.frigidora.toomuchzombies.mechanics.ZombieFactory;
 public class GameEventListener implements Listener {
 
     private final HiveMindManager hiveMindManager = new HiveMindManager();
+    private final AwarenessManager awarenessManager = AwarenessManager.getInstance();
     private final Random random = new Random();
 
     @EventHandler
@@ -206,6 +209,10 @@ public class GameEventListener implements Listener {
 
     @EventHandler
     public void onEntityDamage(EntityDamageEvent event) {
+        if (event.getEntity() instanceof Player player && event.getFinalDamage() > 0.0) {
+            awarenessManager.refreshPlayerBloodState(player);
+        }
+
         if (event.getEntity() instanceof Zombie) {
             Zombie zombie = (Zombie) event.getEntity();
             DamageCause cause = event.getCause();
@@ -301,13 +308,13 @@ public class GameEventListener implements Listener {
     @EventHandler
     public void onSprint(PlayerToggleSprintEvent event) {
         if (event.isSprinting()) {
-            notifyNoise(event.getPlayer().getLocation(), 10.0);
+            notifyNoise(event.getPlayer().getLocation(), 10.0, event.getPlayer());
         }
     }
 
     @EventHandler
     public void onBlockBreak(BlockBreakEvent event) {
-        notifyNoise(event.getBlock().getLocation(), 15.0);
+        notifyNoise(event.getBlock().getLocation(), 15.0, event.getPlayer());
         
         // 如果方块是僵尸放置的，移除元数据
         if (event.getBlock().hasMetadata("ZombieBlock")) {
@@ -317,7 +324,10 @@ public class GameEventListener implements Listener {
 
     @EventHandler
     public void onBlockPlace(BlockPlaceEvent event) {
-        notifyNoise(event.getBlock().getLocation(), 15.0);
+        notifyNoise(event.getBlock().getLocation(), 15.0, event.getPlayer());
+        if (event.getBlockPlaced().getLightEmission() >= 10) {
+            awarenessManager.alertLightAttraction(event.getBlockPlaced().getLocation().add(0.5, 0.5, 0.5), 42.0);
+        }
     }
 
     @EventHandler
@@ -390,6 +400,13 @@ public class GameEventListener implements Listener {
         }
     }
 
+    @EventHandler
+    public void onFoodChange(FoodLevelChangeEvent event) {
+        if (event.getEntity() instanceof Player player && event.getFoodLevel() <= 6) {
+            awarenessManager.refreshPlayerBloodState(player);
+        }
+    }
+
     @EventHandler(priority = org.bukkit.event.EventPriority.MONITOR, ignoreCancelled = true)
     public void onPlayerDamageEntity(EntityDamageByEntityEvent event) {
         if (event.getDamager() instanceof Player) {
@@ -400,7 +417,7 @@ public class GameEventListener implements Listener {
 
     @EventHandler
     public void onCombat(EntityDamageByEntityEvent event) {
-        notifyNoise(event.getEntity().getLocation(), 25.0);
+        notifyNoise(event.getEntity().getLocation(), 25.0, event.getDamager() instanceof Player ? (Player) event.getDamager() : null);
         
         // 1. 玩家攻击僵尸：检查伤害提升
         if (event.getDamager() instanceof Player && event.getEntity() instanceof Zombie) {
@@ -508,6 +525,10 @@ public class GameEventListener implements Listener {
             return;
         }
         ZombieFactory.applyLevelAttributes(zombie, lv);
+        if (random.nextDouble() < (0.18 + Math.min(0.22, lv * 0.02))) {
+            int amplifier = random.nextDouble() < 0.2 ? 1 : 0;
+            zombie.addPotionEffect(new PotionEffect(PotionEffectType.SPEED, Integer.MAX_VALUE, amplifier, true, false, true));
+        }
     }
 
     private int getZombieLevel(Zombie zombie) {
@@ -620,7 +641,7 @@ public class GameEventListener implements Listener {
 
     @EventHandler
     public void onExplode(EntityExplodeEvent event) {
-        notifyNoise(event.getLocation(), 40.0);
+        notifyNoise(event.getLocation(), 40.0, null);
         
         // 防止僵尸 TNT 破坏方块
         if (event.getEntity() instanceof org.bukkit.entity.TNTPrimed) {
@@ -635,32 +656,26 @@ public class GameEventListener implements Listener {
     // 记录每个区块的最后噪音时间，避免高频触发
     private final java.util.Map<Long, Long> chunkNoiseCooldowns = new java.util.concurrent.ConcurrentHashMap<>();
 
-    private void notifyNoise(Location location, double range) {
-        // 性能优化：直接移除 getNearbyEntities 的全量搜索
-        // 改为只提醒 ZombieAIManager，让其自行决定是否处理
-        // 或者简单地，如果配置允许，我们只处理极小范围，或者使用 SpatialPartition
-        
+    private void notifyNoise(Location location, double range, Player sourcePlayer) {
         if (ConfigManager.getInstance().getNoiseThreshold() <= 0) return;
 
         long chunkKey = location.getChunk().getChunkKey();
         long now = System.currentTimeMillis();
-        
-        // 冷却检查：同一区块 1 秒内只处理一次噪音
-        if (chunkNoiseCooldowns.containsKey(chunkKey)) {
-            if (now - chunkNoiseCooldowns.get(chunkKey) < 1000) {
-                return;
-            }
+
+        if (chunkNoiseCooldowns.containsKey(chunkKey) && now - chunkNoiseCooldowns.get(chunkKey) < 1000) {
+            return;
         }
         chunkNoiseCooldowns.put(chunkKey, now);
 
-        // 使用 ZombieAIManager 的 SpatialPartition 进行优化查询
-        // 而不是使用 Bukkit 的 getNearbyEntities (这会遍历区块内所有实体)
-        // ZombieAIManager 已经维护了所有僵尸的位置
-        // 我们只需遍历附近的僵尸 Agent
-        
+        awarenessManager.alertNoise(location, range, sourcePlayer);
+
         java.util.Collection<com.frigidora.toomuchzombies.ai.ZombieAgent> agents = ZombieAIManager.getInstance().getNearbyAgents(location, range);
         for (com.frigidora.toomuchzombies.ai.ZombieAgent agent : agents) {
             agent.setTargetLocation(location);
+            agent.setInvestigationTarget(location, 8000L);
+            if (sourcePlayer != null && sourcePlayer.isValid() && !sourcePlayer.isDead()) {
+                agent.setTargetEntity(sourcePlayer);
+            }
         }
     }
 }

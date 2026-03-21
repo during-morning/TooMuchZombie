@@ -61,6 +61,10 @@ public class ConfigManager {
         return clampDouble(config.getDouble("zombie-ai.build-speed", 1.0), 0.1, 10.0);
     }
 
+    public boolean isTerrainModificationEnabled() {
+        return config.getBoolean("zombie-ai.terrain-modification-enabled", true);
+    }
+
     public int getNoiseThreshold() {
         return clampInt(config.getInt("zombie-ai.noise-threshold", 10), 1, 100);
     }
