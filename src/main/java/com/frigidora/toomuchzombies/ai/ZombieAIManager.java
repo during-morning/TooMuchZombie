@@ -560,10 +560,6 @@ public class ZombieAIManager implements Listener {
             zombie.setTarget(best);
             agent.setTargetEntity(best);
             agent.setLastKnownTargetLocation(best.getLocation());
-            agent.setInvestigationTarget(best.getLocation(), 7000L);
-            if (best instanceof Player player) {
-                AwarenessManager.getInstance().refreshPlayerBloodState(player);
-            }
         }
     }
 
