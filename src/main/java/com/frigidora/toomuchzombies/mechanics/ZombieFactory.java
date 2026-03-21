@@ -448,13 +448,13 @@ public class ZombieFactory {
             zombie.getAttribute(Attribute.GENERIC_MOVEMENT_SPEED).setBaseValue(0.23 + t * 0.12);
         }
         if (zombie.getAttribute(Attribute.GENERIC_ARMOR) != null) {
-            zombie.getAttribute(Attribute.GENERIC_ARMOR).setBaseValue(0.5 + t * 6.0);
+            zombie.getAttribute(Attribute.GENERIC_ARMOR).setBaseValue(0.5 + t * 4.0);
         }
         if (zombie.getAttribute(Attribute.GENERIC_ARMOR_TOUGHNESS) != null) {
-            zombie.getAttribute(Attribute.GENERIC_ARMOR_TOUGHNESS).setBaseValue(t * 3.0);
+            zombie.getAttribute(Attribute.GENERIC_ARMOR_TOUGHNESS).setBaseValue(t * 1.5);
         }
         if (zombie.getAttribute(Attribute.GENERIC_KNOCKBACK_RESISTANCE) != null) {
-            zombie.getAttribute(Attribute.GENERIC_KNOCKBACK_RESISTANCE).setBaseValue(Math.min(1.0, t * 0.95));
+            zombie.getAttribute(Attribute.GENERIC_KNOCKBACK_RESISTANCE).setBaseValue(Math.min(0.35, t * 0.35));
         }
         if (zombie.getAttribute(Attribute.GENERIC_FOLLOW_RANGE) != null) {
             zombie.getAttribute(Attribute.GENERIC_FOLLOW_RANGE).setBaseValue(40.0 + t * 80.0);
@@ -472,9 +472,6 @@ public class ZombieFactory {
         if (level >= 6) {
             zombie.addPotionEffect(new PotionEffect(PotionEffectType.SPEED, Integer.MAX_VALUE, 0, true, false, false));
         }
-        if (level >= 8) {
-            zombie.addPotionEffect(new PotionEffect(PotionEffectType.RESISTANCE, Integer.MAX_VALUE, 0, true, false, false));
-        }
         if (level >= 10) {
             zombie.addPotionEffect(new PotionEffect(PotionEffectType.REGENERATION, Integer.MAX_VALUE, 0, true, false, false));
         }
@@ -483,7 +480,7 @@ public class ZombieFactory {
         }
         if (level >= 12) {
             zombie.addPotionEffect(new PotionEffect(PotionEffectType.REGENERATION, Integer.MAX_VALUE, 1, true, false, false));
-            zombie.addPotionEffect(new PotionEffect(PotionEffectType.RESISTANCE, Integer.MAX_VALUE, 1, true, false, false));
+            zombie.addPotionEffect(new PotionEffect(PotionEffectType.RESISTANCE, Integer.MAX_VALUE, 0, true, false, false));
         }
     }
 

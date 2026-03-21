@@ -85,19 +85,8 @@ public class GameEventListener implements Listener {
             }
         }
         
-        // 血月与明月机制
-        boolean isBloodMoon = com.frigidora.toomuchzombies.mechanics.BloodMoonManager.getInstance().isBloodMoon();
-        boolean isBrightMoon = com.frigidora.toomuchzombies.mechanics.BloodMoonManager.getInstance().isBrightMoon();
-        
-        // 明月升起：夜晚僵尸不会生成
-        if (isBrightMoon && (entity instanceof Zombie || entity instanceof AbstractSkeleton || entity instanceof Creeper || entity instanceof Spider || entity instanceof Enderman || entity instanceof Witch)) {
-            event.setCancelled(true);
-            return;
-        }
-
-        // 检查硬上限 (全局: 2000)
-        // 如果是血月，上限翻倍 (4000)
-        int globalLimit = isBloodMoon ? 6000 : 3000;
+        // 统一使用常规夜晚规则，不再启用血月/明月额外事件。
+        int globalLimit = 1500;
         if (ZombieAIManager.getInstance().getZombieCount() >= globalLimit) {
             if (entity instanceof Zombie || 
                 entity instanceof AbstractSkeleton || 
@@ -111,9 +100,8 @@ public class GameEventListener implements Listener {
             }
         }
         
-        // 限制单玩家周围僵尸数量 (100)
-        // 血月翻倍 (200)
-        int perPlayerLimit = isBloodMoon ? 280 : 160;
+        // 单玩家周围刷怪上限下调 50%。
+        int perPlayerLimit = 80;
         
         // 查找最近的玩家
         Player nearest = null;
@@ -210,10 +198,6 @@ public class GameEventListener implements Listener {
 
     @EventHandler
     public void onEntityDamage(EntityDamageEvent event) {
-        if (event.getEntity() instanceof Player player && event.getFinalDamage() > 0.0) {
-            awarenessManager.refreshPlayerBloodState(player);
-        }
-
         if (event.getEntity() instanceof Zombie) {
             Zombie zombie = (Zombie) event.getEntity();
             DamageCause cause = event.getCause();
@@ -403,9 +387,6 @@ public class GameEventListener implements Listener {
 
     @EventHandler
     public void onFoodChange(FoodLevelChangeEvent event) {
-        if (event.getEntity() instanceof Player player && event.getFoodLevel() <= 6) {
-            awarenessManager.refreshPlayerBloodState(player);
-        }
     }
 
     @EventHandler(priority = org.bukkit.event.EventPriority.MONITOR, ignoreCancelled = true)
@@ -675,10 +656,22 @@ public class GameEventListener implements Listener {
 
         java.util.Collection<com.frigidora.toomuchzombies.ai.ZombieAgent> agents = ZombieAIManager.getInstance().getNearbyAgents(location, range);
         for (com.frigidora.toomuchzombies.ai.ZombieAgent agent : agents) {
-            agent.setTargetLocation(location);
-            agent.setInvestigationTarget(location, 8000L);
+            org.bukkit.entity.LivingEntity currentTarget = agent.getTargetEntity() != null ? agent.getTargetEntity() : agent.getZombie().getTarget();
+            boolean hasValidTarget = currentTarget != null && currentTarget.isValid() && !currentTarget.isDead();
+
             if (sourcePlayer != null && sourcePlayer.isValid() && !sourcePlayer.isDead()) {
-                agent.setTargetEntity(sourcePlayer);
+                double distSq = agent.getZombie().getLocation().distanceSquared(sourcePlayer.getLocation());
+                if (distSq <= Math.max(100.0, range * range * 0.64) || agent.getZombie().hasLineOfSight(sourcePlayer)) {
+                    agent.clearInvestigationTarget();
+                    agent.setTargetEntity(sourcePlayer);
+                    agent.setTargetLocation(sourcePlayer.getLocation());
+                    agent.getZombie().setTarget(sourcePlayer);
+                    continue;
+                }
+            }
+
+            if (!hasValidTarget) {
+                agent.setInvestigationTarget(location, 4000L);
             }
         }
     }

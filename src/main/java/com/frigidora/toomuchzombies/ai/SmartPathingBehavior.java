@@ -93,7 +93,7 @@ public class SmartPathingBehavior {
              Location nearestBeacon = BeaconManager.getInstance().getNearestActiveBeacon(z.getLocation(), 24.0);
              if (nearestBeacon != null) {
                  double beaconDistSq = z.getLocation().distanceSquared(nearestBeacon);
-                 LivingEntity currentTarget = agent.getTargetEntity();
+                 LivingEntity currentTarget = agent.getTargetEntity() != null ? agent.getTargetEntity() : z.getTarget();
                  boolean closeCombat = currentTarget != null
                      && currentTarget.isValid()
                      && currentTarget.getWorld().equals(z.getWorld())
@@ -147,6 +147,21 @@ public class SmartPathingBehavior {
 
         if (targetLoc == null) {
             handleNoTargetBehavior(agent);
+            return;
+        }
+
+        LivingEntity currentTarget = agent.getTargetEntity() != null ? agent.getTargetEntity() : z.getTarget();
+        boolean meleeEngaged = currentTarget != null
+            && currentTarget.isValid()
+            && currentTarget.getWorld().equals(z.getWorld())
+            && agent.getRole() != ZombieRole.ARCHER
+            && agent.getRole() != ZombieRole.ENDER
+            && agent.getRole() != ZombieRole.NURSE
+            && z.getLocation().distanceSquared(currentTarget.getLocation()) <= 3.5 * 3.5;
+        if (meleeEngaged) {
+            if (z.getPathfinder().hasPath()) {
+                z.getPathfinder().stopPathfinding();
+            }
             return;
         }
 

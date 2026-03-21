@@ -13,7 +13,6 @@ commands:
       - spawn <角色>: 生成指定类型的特殊僵尸 (角色: NORMAL, MINER, BUILDER, ARCHER, ENDER, NURSE, RUSHER, SUICIDE)
       - info: 显示插件运行统计信息 (僵尸数量、平均等级等)
       - killall: 清除当前世界所有由插件生成的特殊僵尸
-      - forcebloodmoon: 强制开启血月事件
       - forcechaos: 强制开启混沌模式
       - reload: 重新加载 config.yml 和 messages_*.yml
       - level set <玩家> <等级>: 设置玩家的危险等级
@@ -28,7 +27,6 @@ permissions:
       toomuchzombies.command.spawn: true
       toomuchzombies.command.info: true
       toomuchzombies.command.killall: true
-      toomuchzombies.command.bloodmoon: true
       toomuchzombies.command.chaos: true
       toomuchzombies.command.reload: true
       toomuchzombies.command.level: true
@@ -40,9 +38,6 @@ permissions:
     default: op
   toomuchzombies.command.killall:
     description: 允许使用 /za killall 命令
-    default: op
-  toomuchzombies.command.bloodmoon:
-    description: 允许使用 /za forcebloodmoon 命令
     default: op
   toomuchzombies.command.chaos:
     description: 允许使用 /za forcechaos 命令

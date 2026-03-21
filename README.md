@@ -20,7 +20,6 @@ Paper 1.21+ 的僵尸 AI 强化插件。
 - `/za spawn <role>`
 - `/za info`
 - `/za killall`
-- `/za forcebloodmoon`
 - `/za forcechaos`
 - `/za reload`
 - `/za level set <player> <level>`
