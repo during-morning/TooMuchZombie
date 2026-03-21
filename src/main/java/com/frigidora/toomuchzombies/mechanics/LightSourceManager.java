@@ -103,12 +103,11 @@ public class LightSourceManager {
                isLightBlock(p.getInventory().getItemInOffHand());
     }
 
-    private boolean isLightBlock(ItemStack item) {
-        if (item == null) {
+    public static boolean isAttractingLight(Material type) {
+        if (type == null) {
             return false;
         }
 
-        Material type = item.getType();
         if (type == Material.LIGHT || type == Material.TORCH || type == Material.SOUL_TORCH
             || type == Material.LANTERN || type == Material.SOUL_LANTERN
             || type == Material.GLOWSTONE || type == Material.SEA_LANTERN
@@ -119,5 +118,9 @@ public class LightSourceManager {
         String name = type.name();
         return name.contains("TORCH") || name.contains("LANTERN") || name.contains("CANDLE")
             || name.contains("GLOWSTONE") || name.contains("SEA_LANTERN") || name.contains("SHROOMLIGHT");
+    }
+
+    private boolean isLightBlock(ItemStack item) {
+        return item != null && isAttractingLight(item.getType());
     }
 }
