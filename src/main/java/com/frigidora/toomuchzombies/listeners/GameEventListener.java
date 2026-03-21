@@ -198,10 +198,6 @@ public class GameEventListener implements Listener {
 
     @EventHandler
     public void onEntityDamage(EntityDamageEvent event) {
-        if (event.getEntity() instanceof Player player && event.getFinalDamage() > 0.0) {
-            awarenessManager.refreshPlayerBloodState(player);
-        }
-
         if (event.getEntity() instanceof Zombie) {
             Zombie zombie = (Zombie) event.getEntity();
             DamageCause cause = event.getCause();
@@ -391,9 +387,6 @@ public class GameEventListener implements Listener {
 
     @EventHandler
     public void onFoodChange(FoodLevelChangeEvent event) {
-        if (event.getEntity() instanceof Player player && event.getFoodLevel() <= 6) {
-            awarenessManager.refreshPlayerBloodState(player);
-        }
     }
 
     @EventHandler(priority = org.bukkit.event.EventPriority.MONITOR, ignoreCancelled = true)
@@ -663,10 +656,22 @@ public class GameEventListener implements Listener {
 
         java.util.Collection<com.frigidora.toomuchzombies.ai.ZombieAgent> agents = ZombieAIManager.getInstance().getNearbyAgents(location, range);
         for (com.frigidora.toomuchzombies.ai.ZombieAgent agent : agents) {
-            agent.setTargetLocation(location);
-            agent.setInvestigationTarget(location, 8000L);
+            org.bukkit.entity.LivingEntity currentTarget = agent.getTargetEntity() != null ? agent.getTargetEntity() : agent.getZombie().getTarget();
+            boolean hasValidTarget = currentTarget != null && currentTarget.isValid() && !currentTarget.isDead();
+
             if (sourcePlayer != null && sourcePlayer.isValid() && !sourcePlayer.isDead()) {
-                agent.setTargetEntity(sourcePlayer);
+                double distSq = agent.getZombie().getLocation().distanceSquared(sourcePlayer.getLocation());
+                if (distSq <= Math.max(100.0, range * range * 0.64) || agent.getZombie().hasLineOfSight(sourcePlayer)) {
+                    agent.clearInvestigationTarget();
+                    agent.setTargetEntity(sourcePlayer);
+                    agent.setTargetLocation(sourcePlayer.getLocation());
+                    agent.getZombie().setTarget(sourcePlayer);
+                    continue;
+                }
+            }
+
+            if (!hasValidTarget) {
+                agent.setInvestigationTarget(location, 4000L);
             }
         }
     }

@@ -75,7 +75,6 @@ public class NightHordeManager {
             ZombieFactory.assignRole(zombie);
             int level = ZombieFactory.calculateEncounterLevelNearby(spawnLoc);
             ZombieFactory.applyLevelAttributes(zombie, level);
-            AwarenessManager.getInstance().alertBloodTrail(player, 20.0);
             AwarenessManager.getInstance().alertNoise(spawnLoc, 18.0, player);
         }
     }
@@ -85,15 +84,8 @@ public class NightHordeManager {
             double angle = RANDOM.nextDouble() * Math.PI * 2.0;
             double radius = 18.0 + RANDOM.nextDouble() * 18.0;
             Location base = player.getLocation().clone().add(Math.cos(angle) * radius, 0, Math.sin(angle) * radius);
-            int y = base.getWorld().getHighestBlockYAt(base);
-            Location spawn = new Location(base.getWorld(), base.getX() + 0.5, y + 1.0, base.getZ() + 0.5);
-            if (!spawn.getChunk().isLoaded()) {
-                continue;
-            }
-            if (!spawn.getBlock().isPassable() || !spawn.clone().add(0, 1, 0).getBlock().isPassable()) {
-                continue;
-            }
-            if (!spawn.clone().add(0, -1, 0).getBlock().getType().isSolid()) {
+            Location spawn = findReachableSpawnNearPlayer(player, base);
+            if (spawn == null) {
                 continue;
             }
             if (spawn.distanceSquared(player.getLocation()) < 14 * 14) {
@@ -102,5 +94,40 @@ public class NightHordeManager {
             return spawn;
         }
         return null;
+    }
+
+    private Location findReachableSpawnNearPlayer(Player player, Location base) {
+        if (base.getWorld() == null) {
+            return null;
+        }
+
+        int playerY = player.getLocation().getBlockY();
+        int minY = Math.max(base.getWorld().getMinHeight() + 1, playerY - 8);
+        int maxY = Math.min(base.getWorld().getMaxHeight() - 2, playerY + 8);
+
+        for (int offset = 0; offset <= 8; offset++) {
+            for (int sign : new int[] {1, -1}) {
+                int y = playerY + offset * sign;
+                if (y < minY || y > maxY) {
+                    continue;
+                }
+                Location spawn = new Location(base.getWorld(), base.getBlockX() + 0.5, y, base.getBlockZ() + 0.5);
+                if (isSpawnStandable(spawn)) {
+                    return spawn;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private boolean isSpawnStandable(Location spawn) {
+        if (!spawn.getChunk().isLoaded()) {
+            return false;
+        }
+        if (!spawn.getBlock().isPassable() || !spawn.clone().add(0, 1, 0).getBlock().isPassable()) {
+            return false;
+        }
+        return spawn.clone().add(0, -1, 0).getBlock().getType().isSolid();
     }
 }
