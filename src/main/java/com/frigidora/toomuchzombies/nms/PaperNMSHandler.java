@@ -14,14 +14,12 @@ import com.destroystokyo.paper.entity.ai.Goal;
 import com.destroystokyo.paper.entity.ai.GoalKey;
 import com.destroystokyo.paper.entity.ai.GoalType;
 import com.frigidora.toomuchzombies.TooMuchZombies;
-import com.frigidora.toomuchzombies.ai.ZombieBehaviorGoal;
 
 public class PaperNMSHandler implements NMSHandler {
 
     @Override
     public void injectCustomAI(Zombie zombie) {
-        // 使用 Paper MobGoals API 注入自定义 AI 目标
-        Bukkit.getMobGoals().addGoal(zombie, 2, new ZombieBehaviorGoal(zombie));
+        // 自定义 AI 已切回 ZombieAIManager 的分片调度，避免逐僵尸逐 tick Goal 带来的额外开销。
     }
 
     public void injectChaosTarget(Zombie zombie) {

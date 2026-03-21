@@ -24,15 +24,12 @@ public class ZombieBehaviorGoal implements Goal<Zombie> {
 
     @Override
     public boolean shouldActivate() {
-        return agent != null && zombie.isValid();
+        return false;
     }
 
     @Override
     public void tick() {
-        if (agent != null && !agent.isAiPaused()) {
-            // 执行行为
-            ZombieAIManager.getInstance().executeBehavior(agent);
-        }
+        // AI 逻辑已回收至 ZombieAIManager 的分片调度，此 Goal 不再逐僵尸逐 tick 执行行为。
     }
 
     @Override

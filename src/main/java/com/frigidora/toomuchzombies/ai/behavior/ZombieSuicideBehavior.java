@@ -116,7 +116,7 @@ public class ZombieSuicideBehavior {
         }
 
         // 创建定向爆炸，破坏方块
-        zombie.getWorld().createExplosion(zombie.getLocation(), 2.5F, false, false);
+        zombie.getWorld().createExplosion(zombie.getLocation(), 2.5F, false, true);
         zombie.setHealth(0);
         zombie.remove(); // 彻底移除，触发死亡事件
     }

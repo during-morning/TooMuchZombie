@@ -221,7 +221,7 @@ public class CombatBehavior {
         boolean isAdvanced = Math.random() < 0.3;
         
         tnt.setFuseTicks(isAdvanced ? 20 : 40); // 高级 TNT 爆炸更快 (1s vs 2s)
-        tnt.setYield(0.0f); // 按需求禁用方块破坏，仅保留伤害与压制
+        tnt.setYield(isAdvanced ? 3.5f : 2.4f); // 允许 TNT 改变地形。
         if (isAdvanced) {
             tnt.setGlowing(true); // 高亮显示
             tnt.setCustomName(org.bukkit.ChatColor.RED + "Advanced TNT");

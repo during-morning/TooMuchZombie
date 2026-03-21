@@ -165,8 +165,12 @@ public class SmartPathingBehavior {
             return;
         }
 
+        double directChaseDistSq = currentTarget != null && currentTarget.getWorld().equals(z.getWorld())
+            ? z.getLocation().distanceSquared(currentTarget.getLocation())
+            : Double.MAX_VALUE;
+
         LivingEntity focusTarget = cooperation.getFocusTarget();
-        if (focusTarget != null && focusTarget.isValid()) {
+        if (directChaseDistSq > 10.0 * 10.0 && focusTarget != null && focusTarget.isValid()) {
             applyFocusFormation(agent, focusTarget, cooperation.getFormationSlotIndex());
         }
 
@@ -197,8 +201,11 @@ public class SmartPathingBehavior {
             }
         }
 
-        // 侧翼逻辑 (保持不变)
-        if (agent.isFlanking()) {
+        // 近距离强制直追，禁止侧翼/绕圈，避免来回踱步转圈。
+        if (!agent.isAiPaused() && z.getTarget() != null && directChaseDistSq <= 10.0 * 10.0) {
+            agent.setFlanking(false);
+            agent.moveTo(targetLoc, 1.05);
+        } else if (agent.isFlanking()) {
             Vector toTarget = targetLoc.toVector().subtract(z.getLocation().toVector()).normalize();
             Vector right = new Vector(-toTarget.getZ(), 0, toTarget.getX()).normalize();
             Location flankTarget = z.getLocation().add(right.multiply(5));

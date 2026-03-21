@@ -608,13 +608,6 @@ public class GameEventListener implements Listener {
     public void onExplode(EntityExplodeEvent event) {
         notifyNoise(event.getLocation(), 40.0, null);
         
-        // 防止僵尸 TNT 破坏方块
-        if (event.getEntity() instanceof org.bukkit.entity.TNTPrimed) {
-            org.bukkit.entity.TNTPrimed tnt = (org.bukkit.entity.TNTPrimed) event.getEntity();
-            if (tnt.hasMetadata("ZombieTNT")) {
-                event.blockList().clear();
-            }
-        }
     }
 
     // --- 性能优化：噪音冷却 ---
