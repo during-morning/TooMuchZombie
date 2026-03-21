@@ -75,14 +75,56 @@ public class ZombieBreakerBehavior {
     }
 
     public boolean canBreak(Block block) {
-        // 按需求全局禁用僵尸破坏方块。
-        return false;
+        if (block == null || block.getType() == Material.AIR || !block.getType().isBlock() || !block.getType().isSolid()) {
+            return false;
+        }
+
+        refreshBreakRulesIfNeeded();
+        if (!isBreakAllowed(block)) {
+            hitReject("policy_blocked");
+            return false;
+        }
+
+        double maxReachSq = 8.0;
+        if (!zombie.getWorld().equals(block.getWorld())
+            || zombie.getLocation().distanceSquared(block.getLocation().add(0.5, 0.5, 0.5)) > maxReachSq) {
+            hitReject("too_far");
+            return false;
+        }
+
+        return getBreakSpeed(block) > 0.0f;
     }
 
     public void tick() {
         if (currentTarget == null) return;
-        // 按需求全局禁用僵尸破坏方块。
-        stopBreaking();
+
+        if (!zombie.isValid() || currentTarget.getType() == Material.AIR || !canBreak(currentTarget)) {
+            stopBreaking();
+            return;
+        }
+
+        zombie.swingMainHand();
+        breakProgress += getBreakSpeed(currentTarget) * (float) ConfigManager.getInstance().getBreakSpeed();
+
+        int stage = Math.min(9, Math.max(0, (int) Math.floor(breakProgress * 10.0f)));
+        sendBreakPacket(currentTarget, stage);
+
+        long now = System.currentTimeMillis();
+        if (now - lastBreakSoundTime >= ConfigManager.getInstance().getBreakerHitEffectIntervalMs()) {
+            lastBreakSoundTime = now;
+            org.bukkit.block.data.BlockData data = currentTarget.getBlockData();
+            int hitParticles = ConfigManager.getInstance().getBreakerHitParticleCount();
+            if (hitParticles > 0) {
+                currentTarget.getWorld().spawnParticle(org.bukkit.Particle.BLOCK, currentTarget.getLocation().add(0.5, 0.5, 0.5), hitParticles, 0.2, 0.2, 0.2, data);
+            }
+            currentTarget.getWorld().playSound(currentTarget.getLocation(), data.getSoundGroup().getHitSound(), 0.7f, 0.9f);
+        }
+
+        if (breakProgress >= 1.0f) {
+            Block finished = currentTarget;
+            breakBlock(finished);
+            stopBreaking();
+        }
     }
 
     private float getBreakSpeed(Block block) {

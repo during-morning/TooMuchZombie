@@ -7,6 +7,7 @@ import java.util.Set;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.Material;
+import org.bukkit.block.Block;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.scheduler.BukkitRunnable;
@@ -46,7 +47,9 @@ public class LightSourceManager {
         Set<Location> newSources = new HashSet<>();
         for (Player p : Bukkit.getOnlinePlayers()) {
             if (isHoldingLight(p)) {
-                newSources.add(p.getLocation());
+                Location source = p.getLocation();
+                newSources.add(source);
+                AwarenessManager.getInstance().alertLightAttraction(source, 48.0);
             }
         }
         
@@ -57,23 +60,42 @@ public class LightSourceManager {
     }
 
     public Location getNearestLightSource(Location loc, double maxDistance) {
-        if (lightSources.isEmpty()) return null;
-        
-        Location nearest = null;
-        double minDstSq = maxDistance * maxDistance;
+        Location ambientLight = getAmbientLightLocation(loc, maxDistance);
+        double bestDistSq = ambientLight != null ? ambientLight.distanceSquared(loc) : Double.MAX_VALUE;
+        Location nearest = ambientLight;
 
         synchronized (lightSources) {
             for (Location lightLoc : lightSources) {
                 if (!lightLoc.getWorld().equals(loc.getWorld())) continue;
-                
+
                 double dstSq = lightLoc.distanceSquared(loc);
-                if (dstSq < minDstSq) {
-                    minDstSq = dstSq;
+                if (dstSq < maxDistance * maxDistance && dstSq < bestDistSq) {
+                    bestDistSq = dstSq;
                     nearest = lightLoc;
                 }
             }
         }
         return nearest;
+    }
+
+    public boolean isExposedToStrongLight(Location loc) {
+        return getAmbientLightLocation(loc, 8.0) != null;
+    }
+
+    private Location getAmbientLightLocation(Location loc, double maxDistance) {
+        if (loc == null || loc.getWorld() == null) {
+            return null;
+        }
+
+        Block block = loc.getBlock();
+        int blockLight = block.getLightFromBlocks();
+        int skyLight = block.getLightFromSky();
+        boolean day = loc.getWorld().getTime() >= 0 && loc.getWorld().getTime() < 12000;
+
+        if (blockLight >= 10 || (day && skyLight >= 10 && loc.getWorld().getHighestBlockYAt(loc) <= loc.getY() + 1.0)) {
+            return block.getLocation().add(0.5, 0.5, 0.5);
+        }
+        return null;
     }
 
     private boolean isHoldingLight(Player p) {
@@ -82,6 +104,20 @@ public class LightSourceManager {
     }
 
     private boolean isLightBlock(ItemStack item) {
-        return item != null && item.getType() == Material.LIGHT;
+        if (item == null) {
+            return false;
+        }
+
+        Material type = item.getType();
+        if (type == Material.LIGHT || type == Material.TORCH || type == Material.SOUL_TORCH
+            || type == Material.LANTERN || type == Material.SOUL_LANTERN
+            || type == Material.GLOWSTONE || type == Material.SEA_LANTERN
+            || type == Material.JACK_O_LANTERN || type == Material.SHROOMLIGHT) {
+            return true;
+        }
+
+        String name = type.name();
+        return name.contains("TORCH") || name.contains("LANTERN") || name.contains("CANDLE")
+            || name.contains("GLOWSTONE") || name.contains("SEA_LANTERN") || name.contains("SHROOMLIGHT");
     }
 }

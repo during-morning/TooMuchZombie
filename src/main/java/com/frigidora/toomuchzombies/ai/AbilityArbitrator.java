@@ -12,7 +12,8 @@ public class AbilityArbitrator {
             return AbilityIntent.IDLE;
         }
 
-        boolean hasRecentTarget = agent.getLastKnownTargetLocation() != null && !agent.hasMemoryExpired(2000);
+        boolean hasRecentTarget = (agent.getTargetEntity() != null && agent.getTargetEntity().isValid())
+            || (agent.getLastKnownTargetLocation() != null && !agent.hasMemoryExpired(7000));
 
         if (agent.getSuicideBehavior().isActive()) {
             return AbilityIntent.SUICIDE_CHARGE;

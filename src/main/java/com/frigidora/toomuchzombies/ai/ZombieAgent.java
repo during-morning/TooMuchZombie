@@ -20,6 +20,8 @@ public class ZombieAgent {
     private WeakReference<LivingEntity> targetEntityRef;
     private long lastSeenTargetTime;
     private boolean isFlanking;
+    private Location investigationTarget;
+    private long investigationExpiry;
     
     // 冷却时间映射
     private final Map<String, Long> cooldowns = new HashMap<>();
@@ -169,6 +171,24 @@ public class ZombieAgent {
 
     public void setFlanking(boolean flanking) {
         isFlanking = flanking;
+    }
+
+    public void setInvestigationTarget(Location target, long ttlMs) {
+        this.investigationTarget = target == null ? null : target.clone();
+        this.investigationExpiry = System.currentTimeMillis() + Math.max(250L, ttlMs);
+    }
+
+    public Location getInvestigationTarget() {
+        if (investigationTarget == null || System.currentTimeMillis() > investigationExpiry) {
+            investigationTarget = null;
+            return null;
+        }
+        return investigationTarget.clone();
+    }
+
+    public void clearInvestigationTarget() {
+        investigationTarget = null;
+        investigationExpiry = 0L;
     }
 
     public boolean checkAndResetSkillCooldown(String skillKey, long cooldownMs) {

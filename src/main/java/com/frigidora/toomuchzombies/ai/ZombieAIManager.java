@@ -16,6 +16,7 @@ import org.bukkit.scheduler.BukkitRunnable;
 
 import com.frigidora.toomuchzombies.TooMuchZombies;
 import com.frigidora.toomuchzombies.config.ConfigManager;
+import com.frigidora.toomuchzombies.mechanics.AwarenessManager;
 import com.frigidora.toomuchzombies.enums.BreachAssignmentRole;
 import com.frigidora.toomuchzombies.enums.ZombieRole;
 
@@ -559,6 +560,10 @@ public class ZombieAIManager implements Listener {
             zombie.setTarget(best);
             agent.setTargetEntity(best);
             agent.setLastKnownTargetLocation(best.getLocation());
+            agent.setInvestigationTarget(best.getLocation(), 7000L);
+            if (best instanceof Player player) {
+                AwarenessManager.getInstance().refreshPlayerBloodState(player);
+            }
         }
     }
 
@@ -573,7 +578,9 @@ public class ZombieAIManager implements Listener {
             : 20.0;
         double healthScore = 1.0 - Math.max(0.0, Math.min(1.0, target.getHealth() / Math.max(1.0, maxHealth)));
         double lineOfSightBonus = zombie.hasLineOfSight(target) ? 0.35 : 0.0;
-        return distanceScore + healthScore + lineOfSightBonus;
+        int foodLevel = target instanceof Player player ? player.getFoodLevel() : 20;
+        double hungerScore = target instanceof Player ? (1.0 - Math.max(0.0, Math.min(1.0, foodLevel / 20.0))) * 0.45 : 0.0;
+        return distanceScore + healthScore + hungerScore + lineOfSightBonus;
     }
     
     public void alertZombie(Zombie zombie, Location location) {

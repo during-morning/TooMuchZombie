@@ -2,7 +2,7 @@ language: zh
 
 hive-mind:
   enabled: true
-  sensor-range: 32
+  sensor-range: 40
   memory-duration: 0.25
 
 zombie-ai:
@@ -30,7 +30,7 @@ zombie-ai:
     ally-disadvantage-threshold: 2
     breach-support-cooldown-ms: 3000
     focus-fire-range: 22.0
-    flank-sync-range: 16.0
+    flank-sync-range: 20.0
     bodyguard-scan-range: 20.0
     encircle-range: 22.0
     encircle-replan-ms: 700
@@ -87,12 +87,12 @@ spawn:
   mspt-threshold: 45
   algorithm:
     enabled: true
-    chunk-cooldown-ms: 1200
+    chunk-cooldown-ms: 220
     max-global-zombies: 1800
-    max-near-player: 90
-    spawn-budget-per-player: 6
-    accept-chance: 0.9
-    enforce-night-only: false
+    max-near-player: 220
+    spawn-budget-per-player: 18
+    accept-chance: 1.0
+    enforce-night-only: true
 
 level:
   max: 12
