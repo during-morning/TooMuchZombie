@@ -44,6 +44,7 @@ import com.frigidora.toomuchzombies.config.ConfigManager;
 import com.frigidora.toomuchzombies.enums.ZombieRole;
 import com.frigidora.toomuchzombies.mechanics.AwarenessManager;
 import com.frigidora.toomuchzombies.mechanics.ChaosManager;
+import com.frigidora.toomuchzombies.mechanics.LightSourceManager;
 import com.frigidora.toomuchzombies.mechanics.PlayerLevelManager;
 import com.frigidora.toomuchzombies.mechanics.ZombieFactory;
 
@@ -325,7 +326,7 @@ public class GameEventListener implements Listener {
     @EventHandler
     public void onBlockPlace(BlockPlaceEvent event) {
         notifyNoise(event.getBlock().getLocation(), 15.0, event.getPlayer());
-        if (event.getBlockPlaced().getLightEmission() >= 10) {
+        if (LightSourceManager.isAttractingLight(event.getBlockPlaced().getType())) {
             awarenessManager.alertLightAttraction(event.getBlockPlaced().getLocation().add(0.5, 0.5, 0.5), 42.0);
         }
     }
@@ -515,6 +516,9 @@ public class GameEventListener implements Listener {
         if (lv <= 1) spawnChance = 0.50;
         else if (lv >= maxLevel) spawnChance = 1.00;
         else spawnChance = 0.50 + Math.pow((lv - 1.0) / Math.max(1.0, (maxLevel - 1.0)), 0.60) * 0.50;
+
+        // Performance tuning: keep the level-based curve, but cut total zombie throughput roughly in half.
+        spawnChance *= 0.5;
 
         if (random.nextDouble() > spawnChance) {
             if (event != null) event.setCancelled(true);
