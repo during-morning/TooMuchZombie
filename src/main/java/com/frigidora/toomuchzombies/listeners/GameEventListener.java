@@ -44,6 +44,7 @@ import com.frigidora.toomuchzombies.config.ConfigManager;
 import com.frigidora.toomuchzombies.enums.ZombieRole;
 import com.frigidora.toomuchzombies.mechanics.AwarenessManager;
 import com.frigidora.toomuchzombies.mechanics.ChaosManager;
+import com.frigidora.toomuchzombies.mechanics.LightSourceManager;
 import com.frigidora.toomuchzombies.mechanics.PlayerLevelManager;
 import com.frigidora.toomuchzombies.mechanics.ZombieFactory;
 
@@ -325,7 +326,7 @@ public class GameEventListener implements Listener {
     @EventHandler
     public void onBlockPlace(BlockPlaceEvent event) {
         notifyNoise(event.getBlock().getLocation(), 15.0, event.getPlayer());
-        if (event.getBlockPlaced().getLightEmission() >= 10) {
+        if (LightSourceManager.isAttractingLight(event.getBlockPlaced().getType())) {
             awarenessManager.alertLightAttraction(event.getBlockPlaced().getLocation().add(0.5, 0.5, 0.5), 42.0);
         }
     }
