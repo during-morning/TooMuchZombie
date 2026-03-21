@@ -157,8 +157,8 @@ public class ZombieFactory {
             return false;
         }
 
-        // 预算按“每个玩家附近”判定，不再乘以世界人数，避免单玩家场景被过早限制。
-        int relaxedBudget = Math.max(1, cfg.getSpawnBudgetPerPlayer()) * 3;
+        // 预算按“每个玩家附近”判定；提高系数，避免体感刷怪过稀。
+        int relaxedBudget = Math.max(1, cfg.getSpawnBudgetPerPlayer()) * 8;
         if (nearbyManaged >= relaxedBudget) {
             reject("budget");
             return false;
@@ -167,16 +167,16 @@ public class ZombieFactory {
         String key = chunkKey(loc.getChunk());
         long now = System.currentTimeMillis();
         Long last = chunkCooldowns.get(key);
-        long cooldownMs = cfg.getSpawnChunkCooldownMs();
+        long cooldownMs = Math.max(200L, cfg.getSpawnChunkCooldownMs() / 2L);
         if (last != null && now - last < cooldownMs) {
             // 冷却后半段允许少量提前通过，降低“刷怪节奏过慢”的体感。
-            if (now - last < cooldownMs / 2L || RANDOM.nextDouble() < 0.65) {
+            if (now - last < cooldownMs / 3L || RANDOM.nextDouble() < 0.35) {
                 reject("chunk_cooldown");
                 return false;
             }
         }
 
-        double effectiveAcceptChance = Math.max(cfg.getSpawnAcceptChance(), 0.96);
+        double effectiveAcceptChance = Math.max(cfg.getSpawnAcceptChance(), 0.99);
         if (RANDOM.nextDouble() > effectiveAcceptChance) {
             reject("accept_rate");
             return false;

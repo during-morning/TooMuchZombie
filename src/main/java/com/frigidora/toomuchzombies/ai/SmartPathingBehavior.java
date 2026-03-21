@@ -26,31 +26,15 @@ public class SmartPathingBehavior {
         Zombie z = agent.getZombie();
         Location targetLoc = agent.getLastKnownTargetLocation();
         
-        // --- 全局 Debuff 系统：白天虚弱/减速 ---
-        // 性能优化：每 20 tick (1秒) 检查一次，而不是每 tick
-        if (z.getTicksLived() % 20 == 0) {
-            long time = z.getWorld().getTime();
-            boolean isDay = time >= 0 && time < 12000;
-            if (isDay) {
-                // 白天僵尸得到虚弱2缓慢1
-                z.addPotionEffect(new org.bukkit.potion.PotionEffect(org.bukkit.potion.PotionEffectType.WEAKNESS, 40, 1)); // Weakness 2 (Amplifier 1)
-                // 兼容性写法: SLOW (old) / SLOWNESS (new)
-                org.bukkit.potion.PotionEffectType slowType = org.bukkit.potion.PotionEffectType.getByName("SLOW");
-                if (slowType == null) slowType = org.bukkit.potion.PotionEffectType.getByName("SLOWNESS");
-                if (slowType != null) {
-                    z.addPotionEffect(new org.bukkit.potion.PotionEffect(slowType, 40, 0)); // Slowness 1 (Amplifier 0)
-                }
-            }
-        }
-
         // 1. 获取行为模块
         ZombieBuilderBehavior builder = agent.getBuilderBehavior();
         ZombieBreakerBehavior breaker = agent.getBreakerBehavior();
         ZombieSuicideBehavior suicide = agent.getSuicideBehavior();
         ZombieCooperationBehavior cooperation = agent.getCooperationBehavior();
 
-        // 按需求禁用地形改造：不铺地板、不破坏方块。
-        final boolean terrainModificationEnabled = false;
+        // 地形改造开关由配置驱动。
+        final boolean terrainModificationEnabled = TooMuchZombies.getInstance().getConfig()
+            .getBoolean("zombie-ai.terrain-modification-enabled", true);
         if (!terrainModificationEnabled) {
             if (builder.isActive()) {
                 builder.setActive(false);
