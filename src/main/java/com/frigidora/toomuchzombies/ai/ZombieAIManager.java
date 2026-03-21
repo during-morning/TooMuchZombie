@@ -463,16 +463,13 @@ public class ZombieAIManager implements Listener {
             }
             
             // 3. 执行 AI 行为
-            // 优化：移除此处的 AI 执行，交由 ZombieBehaviorGoal (Paper Goal) 每 tick 执行
-            // 这里只负责管理任务（如清理、分区更新）
-            /*
+            // 这里保留管理器侧执行，作为 Goal 注入失败时的兜底，避免僵尸只剩原版行为。
             try {
                 executeBehavior(agent);
             } catch (Exception e) {
                 // 防止单个实体错误导致崩溃
                 e.printStackTrace();
             }
-            */
         }
     }
 
