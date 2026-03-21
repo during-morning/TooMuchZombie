@@ -87,13 +87,10 @@ public class ZombieBuilderBehavior {
     public void tick() {
         if (!active) return;
         
-        // 抗击退属性：工程僵尸不可被击退
-        // 这通常需要监听 EntityDamageEvent 或者设置属性。
-        // 由于这里是 AI tick，我们只能尝试通过属性来设置，或者在生成时设置。
-        // 为了确保生效，我们可以在这里持续检查并设置属性。
+        // 工程僵尸保留少量抗击退，但不再完全免疫，避免手感过硬。
         if (zombie.getAttribute(org.bukkit.attribute.Attribute.GENERIC_KNOCKBACK_RESISTANCE) != null) {
-            if (zombie.getAttribute(org.bukkit.attribute.Attribute.GENERIC_KNOCKBACK_RESISTANCE).getValue() < 1.0) {
-                zombie.getAttribute(org.bukkit.attribute.Attribute.GENERIC_KNOCKBACK_RESISTANCE).setBaseValue(1.0);
+            if (zombie.getAttribute(org.bukkit.attribute.Attribute.GENERIC_KNOCKBACK_RESISTANCE).getValue() < 0.35) {
+                zombie.getAttribute(org.bukkit.attribute.Attribute.GENERIC_KNOCKBACK_RESISTANCE).setBaseValue(0.35);
             }
         }
         

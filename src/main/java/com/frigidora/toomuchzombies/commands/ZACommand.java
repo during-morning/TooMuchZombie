@@ -13,7 +13,6 @@ import com.frigidora.toomuchzombies.config.ConfigManager;
 import com.frigidora.toomuchzombies.config.LanguageManager;
 import com.frigidora.toomuchzombies.enums.BreachAssignmentRole;
 import com.frigidora.toomuchzombies.enums.ZombieRole;
-import com.frigidora.toomuchzombies.mechanics.BloodMoonManager;
 import com.frigidora.toomuchzombies.mechanics.ChaosManager;
 import com.frigidora.toomuchzombies.mechanics.PlayerLevelManager;
 import com.frigidora.toomuchzombies.mechanics.TemporaryBlockManager;
@@ -38,7 +37,6 @@ public class ZACommand implements CommandExecutor {
         
         // 权限检查
         String permission = "toomuchzombies.command." + sub;
-        if (sub.equals("forcebloodmoon")) permission = "toomuchzombies.command.bloodmoon";
         if (sub.equals("forcechaos")) permission = "toomuchzombies.command.chaos";
         
         if (!sender.hasPermission(permission) && !sender.hasPermission("toomuchzombies.admin")) {
@@ -56,14 +54,6 @@ public class ZACommand implements CommandExecutor {
             case "killall":
                 ZombieAIManager.getInstance().killAllZombies();
                 sender.sendMessage(lm.getMessage("killall-success"));
-                break;
-            case "forcebloodmoon":
-                if (sender instanceof Player) {
-                    BloodMoonManager.getInstance().startBloodMoonSequence(((Player) sender).getWorld());
-                    sender.sendMessage(lm.getMessage("blood-moon-triggered"));
-                } else {
-                    sender.sendMessage(lm.getMessage("players-only"));
-                }
                 break;
             case "forcechaos":
                 if (sender instanceof Player) {
