@@ -18,6 +18,7 @@ import com.frigidora.toomuchzombies.ai.behavior.ZombieSuicideBehavior;
 import com.frigidora.toomuchzombies.enums.ZombieRole;
 import com.frigidora.toomuchzombies.mechanics.BeaconManager;
 import com.frigidora.toomuchzombies.mechanics.LightSourceManager;
+import com.frigidora.toomuchzombies.config.ConfigManager;
 
 public class SmartPathingBehavior {
     private final Random random = new Random();
@@ -26,21 +27,10 @@ public class SmartPathingBehavior {
         Zombie z = agent.getZombie();
         Location targetLoc = agent.getLastKnownTargetLocation();
         
-        // --- 全局 Debuff 系统：白天虚弱/减速 ---
+        // --- 全局 Debuff 系统：白天/强光下减速虚弱 ---
         // 性能优化：每 20 tick (1秒) 检查一次，而不是每 tick
         if (z.getTicksLived() % 20 == 0) {
-            long time = z.getWorld().getTime();
-            boolean isDay = time >= 0 && time < 12000;
-            if (isDay) {
-                // 白天僵尸得到虚弱2缓慢1
-                z.addPotionEffect(new org.bukkit.potion.PotionEffect(org.bukkit.potion.PotionEffectType.WEAKNESS, 40, 1)); // Weakness 2 (Amplifier 1)
-                // 兼容性写法: SLOW (old) / SLOWNESS (new)
-                org.bukkit.potion.PotionEffectType slowType = org.bukkit.potion.PotionEffectType.getByName("SLOW");
-                if (slowType == null) slowType = org.bukkit.potion.PotionEffectType.getByName("SLOWNESS");
-                if (slowType != null) {
-                    z.addPotionEffect(new org.bukkit.potion.PotionEffect(slowType, 40, 0)); // Slowness 1 (Amplifier 0)
-                }
-            }
+            applyLightDebuffs(z);
         }
 
         // 1. 获取行为模块
@@ -49,8 +39,7 @@ public class SmartPathingBehavior {
         ZombieSuicideBehavior suicide = agent.getSuicideBehavior();
         ZombieCooperationBehavior cooperation = agent.getCooperationBehavior();
 
-        // 按需求禁用地形改造：不铺地板、不破坏方块。
-        final boolean terrainModificationEnabled = false;
+        final boolean terrainModificationEnabled = ConfigManager.getInstance().isTerrainModificationEnabled();
         if (!terrainModificationEnabled) {
             if (builder.isActive()) {
                 builder.setActive(false);
@@ -133,8 +122,7 @@ public class SmartPathingBehavior {
              Location nearestLight = LightSourceManager.getInstance().getNearestLightSource(z.getLocation(), 15.0);
              
              if (nearestLight != null) {
-                 z.addPotionEffect(new org.bukkit.potion.PotionEffect(org.bukkit.potion.PotionEffectType.SLOWNESS, 60, 1));
-                 z.addPotionEffect(new org.bukkit.potion.PotionEffect(org.bukkit.potion.PotionEffectType.WEAKNESS, 60, 1));
+                 applyLightDebuffs(z);
                  z.addPotionEffect(new org.bukkit.potion.PotionEffect(org.bukkit.potion.PotionEffectType.GLOWING, 60, 0));
 
                  Vector fleeDir = z.getLocation().toVector().subtract(nearestLight.toVector()).normalize();
@@ -215,6 +203,23 @@ public class SmartPathingBehavior {
         }
     }
 
+
+    private void applyLightDebuffs(Zombie z) {
+        boolean isDay = z.getWorld().getTime() >= 0 && z.getWorld().getTime() < 12000;
+        boolean strongLight = LightSourceManager.getInstance().isExposedToStrongLight(z.getLocation());
+        if (!isDay && !strongLight) {
+            return;
+        }
+
+        z.addPotionEffect(new org.bukkit.potion.PotionEffect(org.bukkit.potion.PotionEffectType.WEAKNESS, 40, strongLight ? 1 : 0, true, false, false));
+        org.bukkit.potion.PotionEffectType slowType = org.bukkit.potion.PotionEffectType.getByName("SLOW");
+        if (slowType == null) slowType = org.bukkit.potion.PotionEffectType.getByName("SLOWNESS");
+        if (slowType != null) {
+            int amplifier = strongLight ? 2 : 1;
+            z.addPotionEffect(new org.bukkit.potion.PotionEffect(slowType, 40, amplifier, true, false, false));
+        }
+    }
+
     private void handleSimpleObstacle(ZombieAgent agent, Location targetLoc, ZombieBreakerBehavior breaker) {
         Zombie z = agent.getZombie();
         // 简单的障碍物检查
@@ -284,6 +289,44 @@ public class SmartPathingBehavior {
             Location up = z.getLocation().clone().add(0, 1.5, 0);
             agent.moveTo(up, 1.0);
             return;
+        }
+
+        Location investigationTarget = agent.getInvestigationTarget();
+        if (investigationTarget != null && investigationTarget.getWorld() != null && investigationTarget.getWorld().equals(z.getWorld())) {
+            if (z.getLocation().distanceSquared(investigationTarget) <= 4.0) {
+                agent.clearInvestigationTarget();
+            } else {
+                agent.moveTo(investigationTarget, 1.0);
+                return;
+            }
+        }
+
+        long time = z.getWorld().getTime();
+        if (time >= 13000 && time <= 23000 && agent.checkAndResetSkillCooldown("LIGHT_INVESTIGATE", 1200)) {
+            Location distantLight = LightSourceManager.getInstance().getNearestLightSource(z.getLocation(), 40.0);
+            if (distantLight != null && z.getLocation().distanceSquared(distantLight) >= 12 * 12) {
+                agent.setInvestigationTarget(distantLight, 8000L);
+                agent.moveTo(distantLight, 0.95);
+                return;
+            }
+        }
+
+        if (agent.checkAndResetSkillCooldown("PACK_DRIFT", 1200)) {
+            Vector center = new Vector(0, 0, 0);
+            int allies = 0;
+            for (org.bukkit.entity.Entity entity : z.getNearbyEntities(12, 6, 12)) {
+                if (entity instanceof Zombie other && !other.getUniqueId().equals(z.getUniqueId())) {
+                    center.add(other.getLocation().toVector());
+                    allies++;
+                }
+            }
+            if (allies >= 2) {
+                center.multiply(1.0 / allies);
+                Location groupTarget = center.toLocation(z.getWorld());
+                groupTarget.setY(z.getLocation().getY());
+                agent.moveTo(groupTarget, 0.9);
+                return;
+            }
         }
 
         // 无目标时做低频随机巡游，避免僵尸长时间静止

@@ -26,7 +26,9 @@ public class TooMuchZombies extends JavaPlugin {
         com.frigidora.toomuchzombies.mechanics.BloodMoonManager.initialize();
         com.frigidora.toomuchzombies.mechanics.ChaosManager.initialize();
         com.frigidora.toomuchzombies.mechanics.PhantomManager.initialize();
+        com.frigidora.toomuchzombies.mechanics.AwarenessManager.initialize();
         com.frigidora.toomuchzombies.mechanics.LightSourceManager.initialize();
+        com.frigidora.toomuchzombies.mechanics.NightHordeManager.initialize();
         com.frigidora.toomuchzombies.mechanics.BeaconManager.initialize();
         com.frigidora.toomuchzombies.mechanics.TemporaryBlockManager.initialize();
         com.frigidora.toomuchzombies.mechanics.ZombieFactory.loadConfig();
