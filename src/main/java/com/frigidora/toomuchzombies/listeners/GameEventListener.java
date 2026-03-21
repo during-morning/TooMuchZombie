@@ -85,19 +85,8 @@ public class GameEventListener implements Listener {
             }
         }
         
-        // 血月与明月机制
-        boolean isBloodMoon = com.frigidora.toomuchzombies.mechanics.BloodMoonManager.getInstance().isBloodMoon();
-        boolean isBrightMoon = com.frigidora.toomuchzombies.mechanics.BloodMoonManager.getInstance().isBrightMoon();
-        
-        // 明月升起：夜晚僵尸不会生成
-        if (isBrightMoon && (entity instanceof Zombie || entity instanceof AbstractSkeleton || entity instanceof Creeper || entity instanceof Spider || entity instanceof Enderman || entity instanceof Witch)) {
-            event.setCancelled(true);
-            return;
-        }
-
-        // 检查硬上限 (全局: 2000)
-        // 如果是血月，上限翻倍 (4000)
-        int globalLimit = isBloodMoon ? 6000 : 3000;
+        // 统一使用常规夜晚规则，不再启用血月/明月额外事件。
+        int globalLimit = 1500;
         if (ZombieAIManager.getInstance().getZombieCount() >= globalLimit) {
             if (entity instanceof Zombie || 
                 entity instanceof AbstractSkeleton || 
@@ -111,9 +100,8 @@ public class GameEventListener implements Listener {
             }
         }
         
-        // 限制单玩家周围僵尸数量 (100)
-        // 血月翻倍 (200)
-        int perPlayerLimit = isBloodMoon ? 280 : 160;
+        // 单玩家周围刷怪上限下调 50%。
+        int perPlayerLimit = 80;
         
         // 查找最近的玩家
         Player nearest = null;
