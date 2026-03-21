@@ -325,7 +325,7 @@ public class GameEventListener implements Listener {
     @EventHandler
     public void onBlockPlace(BlockPlaceEvent event) {
         notifyNoise(event.getBlock().getLocation(), 15.0, event.getPlayer());
-        if (isPlacedLightSource(event.getBlockPlaced().getType())) {
+        if (event.getBlockPlaced().getLightEmission() >= 10) {
             awarenessManager.alertLightAttraction(event.getBlockPlaced().getLocation().add(0.5, 0.5, 0.5), 42.0);
         }
     }
