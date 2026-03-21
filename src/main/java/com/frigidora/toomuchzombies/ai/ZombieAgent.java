@@ -33,6 +33,9 @@ public class ZombieAgent {
     
     // 搭建状态
     private Location lastBuildLocation;
+    private Location lastMoveCommandLocation;
+    private long lastMoveCommandAt = 0L;
+    private double lastMoveCommandSpeed = Double.NaN;
     private long buildLockUntil = 0; // 锁定移动直到此时间戳
     
     // 战斗状态
@@ -244,11 +247,38 @@ public class ZombieAgent {
     }
 
     public void moveTo(Location loc, double speed) {
+        if (loc == null || loc.getWorld() == null || zombie == null || !zombie.isValid()) {
+            return;
+        }
         if (aiPaused) {
             zombie.setTarget(null); // 如果 AI 已暂停，清除目标以防止干扰手动移动
         }
+
+        Location currentLoc = zombie.getLocation();
+        if (!currentLoc.getWorld().equals(loc.getWorld())) {
+            return;
+        }
+        if (currentLoc.distanceSquared(loc) <= 1.0) {
+            return;
+        }
+
+        long now = System.currentTimeMillis();
+        boolean sameDestination = lastMoveCommandLocation != null
+            && lastMoveCommandLocation.getWorld() != null
+            && lastMoveCommandLocation.getWorld().equals(loc.getWorld())
+            && lastMoveCommandLocation.distanceSquared(loc) <= 2.25;
+        boolean similarSpeed = Double.isNaN(lastMoveCommandSpeed) || Math.abs(lastMoveCommandSpeed - speed) <= 0.08;
+        boolean recentCommand = now - lastMoveCommandAt < 250L;
+
+        if (sameDestination && similarSpeed && recentCommand && zombie.getPathfinder().hasPath()) {
+            return;
+        }
+
         if (com.frigidora.toomuchzombies.TooMuchZombies.getNMSHandler() != null) {
             com.frigidora.toomuchzombies.TooMuchZombies.getNMSHandler().moveTo(zombie, loc, speed);
+            lastMoveCommandLocation = loc.clone();
+            lastMoveCommandAt = now;
+            lastMoveCommandSpeed = speed;
         }
     }
     
