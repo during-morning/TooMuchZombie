@@ -180,8 +180,13 @@ public class SmartPathingBehavior {
         }
 
         LivingEntity focusTarget = cooperation.getFocusTarget();
-        if (focusTarget != null && focusTarget.isValid()) {
+        boolean allowFormation = focusTarget != null
+            && focusTarget.isValid()
+            && focusTarget.getWorld().equals(z.getWorld())
+            && z.getLocation().distanceSquared(focusTarget.getLocation()) >= 8.0 * 8.0;
+        if (allowFormation) {
             applyFocusFormation(agent, focusTarget, cooperation.getFormationSlotIndex());
+            return;
         }
 
         // 8. 决策：是否切换到“建筑师模式” (Structural Pathing)
@@ -212,11 +217,21 @@ public class SmartPathingBehavior {
         }
 
         // 侧翼逻辑 (保持不变)
-        if (agent.isFlanking()) {
-            Vector toTarget = targetLoc.toVector().subtract(z.getLocation().toVector()).normalize();
-            Vector right = new Vector(-toTarget.getZ(), 0, toTarget.getX()).normalize();
-            Location flankTarget = z.getLocation().add(right.multiply(5));
-            agent.moveTo(flankTarget, 1.2);
+        boolean canFlank = agent.isFlanking()
+            && currentTarget != null
+            && currentTarget.isValid()
+            && currentTarget.getWorld().equals(z.getWorld())
+            && z.getLocation().distanceSquared(currentTarget.getLocation()) >= 9.0 * 9.0;
+        if (canFlank) {
+            Vector toTarget = targetLoc.toVector().subtract(z.getLocation().toVector()).setY(0);
+            if (toTarget.lengthSquared() > 0.01) {
+                toTarget.normalize();
+                Vector right = new Vector(-toTarget.getZ(), 0, toTarget.getX()).normalize();
+                Location flankTarget = currentTarget.getLocation().clone().add(right.multiply(3.0));
+                flankTarget.setY(z.getLocation().getY());
+                agent.moveTo(flankTarget, 1.12);
+                return;
+            }
         } else {
             // 确保没有被锁定移动
             if (!agent.isAiPaused() && currentTarget != null) {
