@@ -14,9 +14,13 @@ zombie-ai:
   noise-threshold: 10
   terrain-modification-enabled: true
   targeting:
-    scan-cooldown-ms: 300
-    switch-score-delta: 0.14
+    scan-cooldown-ms: 450
+    switch-score-delta: 0.22
     max-range: 56.0
+  recovery:
+    repath-cooldown-ms: 700
+    stuck-warning-ticks: 35
+    stuck-teleport-ticks: 110
   build-blocks:
     - COBBLESTONE
     - DIRT
@@ -26,14 +30,14 @@ zombie-ai:
 
   cooperation:
     retreat-health-threshold: 0.35
-    regroup-distance: 14.0
+    regroup-distance: 11.0
     ally-disadvantage-threshold: 2
     breach-support-cooldown-ms: 3000
-    focus-fire-range: 22.0
-    flank-sync-range: 20.0
+    focus-fire-range: 18.0
+    flank-sync-range: 14.0
     bodyguard-scan-range: 20.0
-    encircle-range: 22.0
-    encircle-replan-ms: 700
+    encircle-range: 16.0
+    encircle-replan-ms: 1100
     breach-arrive-radius: 3.6
 
   pathing:
@@ -88,9 +92,11 @@ spawn:
   algorithm:
     enabled: true
     chunk-cooldown-ms: 220
-    max-global-zombies: 900
-    max-near-player: 110
-    spawn-budget-per-player: 9
+    max-global-zombies: 720
+    max-near-player: 84
+    spawn-budget-per-player: 7
+    max-y-diff: 18
+    vertical-search-range: 8
     accept-chance: 1.0
     enforce-night-only: true
 
@@ -130,3 +136,9 @@ phantom:
   explode-chance: 0.04
   break-block-chance: 0.3
   attack-effect-chance: 0.1
+
+
+blood-moon:
+  chance: 0.08
+  multiplier: 1.65
+  health-multiplier: 1.20

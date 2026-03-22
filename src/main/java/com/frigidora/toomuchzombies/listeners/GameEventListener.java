@@ -43,7 +43,7 @@ import com.frigidora.toomuchzombies.ai.ZombieAIManager;
 import com.frigidora.toomuchzombies.config.ConfigManager;
 import com.frigidora.toomuchzombies.enums.ZombieRole;
 import com.frigidora.toomuchzombies.mechanics.AwarenessManager;
-import com.frigidora.toomuchzombies.mechanics.ChaosManager;
+import com.frigidora.toomuchzombies.mechanics.BloodMoonManager;
 import com.frigidora.toomuchzombies.mechanics.LightSourceManager;
 import com.frigidora.toomuchzombies.mechanics.PlayerLevelManager;
 import com.frigidora.toomuchzombies.mechanics.ZombieFactory;
@@ -57,10 +57,6 @@ public class GameEventListener implements Listener {
     @EventHandler
     public void onEntityTarget(EntityTargetLivingEntityEvent event) {
         if (event.getEntity() instanceof Zombie && event.getTarget() instanceof Zombie) {
-            // 如果混乱模式处于活动状态，允许锁定目标
-            if (ChaosManager.getInstance().isChaosNight()) return;
-            
-            // 否则取消
             event.setCancelled(true);
         }
     }
@@ -84,25 +80,23 @@ public class GameEventListener implements Listener {
                 return;
             }
         }
-        
-        // 统一使用常规夜晚规则，不再启用血月/明月额外事件。
-        int globalLimit = 1500;
+
+        int globalLimit = BloodMoonManager.getInstance().isBloodMoon(loc.getWorld()) ? 1200 : 900;
         if (ZombieAIManager.getInstance().getZombieCount() >= globalLimit) {
-            if (entity instanceof Zombie || 
-                entity instanceof AbstractSkeleton || 
-                entity instanceof Creeper || 
+            if (entity instanceof Zombie ||
+                entity instanceof AbstractSkeleton ||
+                entity instanceof Creeper ||
                 entity instanceof Spider ||
                 entity instanceof Enderman ||
                 entity instanceof Witch) {
-                    
+
                 event.setCancelled(true);
                 return;
             }
         }
-        
-        // 单玩家周围刷怪上限下调 50%。
-        int perPlayerLimit = 80;
-        
+
+        int perPlayerLimit = BloodMoonManager.getInstance().isBloodMoon(loc.getWorld()) ? 92 : 72;
+
         // 查找最近的玩家
         Player nearest = null;
         double minDistSq = Double.MAX_VALUE;
@@ -113,7 +107,7 @@ public class GameEventListener implements Listener {
                 nearest = p;
             }
         }
-        
+
         if (nearest != null && minDistSq < 96 * 96) { // 放宽到 96 格范围内的生成
             int nearbyZombies = 0;
             for (Entity e : nearest.getNearbyEntities(96, 96, 96)) {
@@ -121,29 +115,29 @@ public class GameEventListener implements Listener {
                     nearbyZombies++;
                 }
             }
-            
+
             if (nearbyZombies >= perPlayerLimit) {
                 event.setCancelled(true);
                 return;
             }
         }
-        
+
         // 海洋生物转化
         if (entity instanceof org.bukkit.entity.Drowned) {
             ZombieFactory.assignRole((Zombie) entity);
             calculateAndApplyStats(event, (Zombie) entity, loc);
             return;
         }
-        
+
         // 地狱生物转化 (僵尸猪灵)
         if (entity.getType() == EntityType.ZOMBIFIED_PIGLIN) {
             Zombie z = (Zombie) entity;
             // 注入 AI，但保持中立
             ZombieFactory.assignRole(z);
             // 修正猪人建筑工只能用特定方块
-            if (ZombieAIManager.getInstance().getAgent(z.getUniqueId()) != null && 
+            if (ZombieAIManager.getInstance().getAgent(z.getUniqueId()) != null &&
                 ZombieAIManager.getInstance().getAgent(z.getUniqueId()).getRole() == ZombieRole.BUILDER) {
-                
+
                 Material[] netherBlocks = {Material.NETHERRACK, Material.COBBLESTONE, Material.BONE_BLOCK};
                 z.getEquipment().setItemInMainHand(new ItemStack(netherBlocks[random.nextInt(netherBlocks.length)]));
             }
@@ -189,7 +183,7 @@ public class GameEventListener implements Listener {
     public void onEntityCombust(EntityCombustEvent event) {
         if (event.getEntity() instanceof Zombie) {
             // 如果不是由实体或方块引起的燃烧，通常是阳光
-            if (!(event instanceof org.bukkit.event.entity.EntityCombustByEntityEvent) && 
+            if (!(event instanceof org.bukkit.event.entity.EntityCombustByEntityEvent) &&
                 !(event instanceof org.bukkit.event.entity.EntityCombustByBlockEvent)) {
                 event.setCancelled(true);
             }
@@ -201,7 +195,7 @@ public class GameEventListener implements Listener {
         if (event.getEntity() instanceof Zombie) {
             Zombie zombie = (Zombie) event.getEntity();
             DamageCause cause = event.getCause();
-            
+
             // 获取等级
             int level = 1;
             NamespacedKey key = new NamespacedKey(com.frigidora.toomuchzombies.TooMuchZombies.getInstance(), "zombie_level");
@@ -209,28 +203,18 @@ public class GameEventListener implements Listener {
                 level = zombie.getPersistentDataContainer().get(key, PersistentDataType.INTEGER);
             }
 
-            if (level >= 4) {
-                // 4级之后：减免50%衰落/近程伤害
-                if (cause == DamageCause.FALL || cause == DamageCause.ENTITY_ATTACK) {
-                    event.setDamage(event.getDamage() * 0.5);
-                }
-                
-                // 4级之后：获得2倍远程/火焰等伤害
-                if (cause == DamageCause.PROJECTILE || 
-                    cause == DamageCause.FIRE || 
-                    cause == DamageCause.FIRE_TICK || 
-                    cause == DamageCause.LAVA || 
-                    cause == DamageCause.HOT_FLOOR ||
-                    cause == DamageCause.MAGIC) { // "等"可能包括魔法
-                    event.setDamage(event.getDamage() * 2.0);
-                }
-            } else {
-                 // 之前我已经加了无条件 50% 减伤，现在应该由 Level 控制，所以这里不再额外处理
-                 // 或者，如果用户想要所有僵尸都减免，就不会特意说 "4级之后"。
-                 // 所以这里不做处理，恢复原版伤害机制。
+            if (level >= 8 && (cause == DamageCause.FALL || cause == DamageCause.ENTITY_ATTACK)) {
+                event.setDamage(event.getDamage() * 0.85);
             }
-            
-            // 移除原本的火焰/爆炸免疫逻辑
+
+            if (cause == DamageCause.PROJECTILE ||
+                cause == DamageCause.FIRE ||
+                cause == DamageCause.FIRE_TICK ||
+                cause == DamageCause.LAVA ||
+                cause == DamageCause.HOT_FLOOR ||
+                cause == DamageCause.MAGIC) {
+                event.setDamage(event.getDamage() * 1.2);
+            }
         }
     }
 
@@ -243,7 +227,7 @@ public class GameEventListener implements Listener {
                 com.frigidora.toomuchzombies.ai.ZombieAgent agent = ZombieAIManager.getInstance().getAgent(z.getUniqueId());
                 if (agent != null && agent.getRole() == ZombieRole.ENDER) {
                     // 末影珍珠僵尸扔出末影珍珠会受到5点摔落伤害
-                    z.damage(5.0); 
+                    z.damage(5.0);
                     // 播放末影人瞬移声音
                     z.getWorld().playSound(z.getLocation(), org.bukkit.Sound.ENTITY_ENDERMAN_TELEPORT, 1.0F, 1.0F);
                 }
@@ -266,7 +250,7 @@ public class GameEventListener implements Listener {
                 // 所以我们需要一个新的方法或者在 recordKill 中判断。
             }
         }
-        
+
         if (event.getEntity() instanceof Zombie) {
             Zombie zombie = (Zombie) event.getEntity();
             int level = getZombieLevel(zombie);
@@ -300,7 +284,7 @@ public class GameEventListener implements Listener {
     @EventHandler
     public void onBlockBreak(BlockBreakEvent event) {
         notifyNoise(event.getBlock().getLocation(), 15.0, event.getPlayer());
-        
+
         // 如果方块是僵尸放置的，移除元数据
         if (event.getBlock().hasMetadata("ZombieBlock")) {
             event.getBlock().removeMetadata("ZombieBlock", com.frigidora.toomuchzombies.TooMuchZombies.getInstance());
@@ -317,9 +301,9 @@ public class GameEventListener implements Listener {
 
     @EventHandler
     public void onPlayerInteract(org.bukkit.event.player.PlayerInteractEvent event) {
-        if (event.getAction() == org.bukkit.event.block.Action.RIGHT_CLICK_AIR || 
+        if (event.getAction() == org.bukkit.event.block.Action.RIGHT_CLICK_AIR ||
             event.getAction() == org.bukkit.event.block.Action.RIGHT_CLICK_BLOCK) {
-            
+
             ItemStack item = event.getItem();
             if (item != null && item.getType() == Material.LIGHT) {
                 // 检查是否是特定的“光源”方块（通过名称识别，防止冲突）
@@ -331,31 +315,31 @@ public class GameEventListener implements Listener {
                         isLightBlock = true;
                     }
                 }
-                
+
                 if (!isLightBlock) return; // 如果不是特定的光源方块，不执行逻辑
-                
+
                 Player player = event.getPlayer();
-                
+
                 // 消耗光源
                 if (player.getGameMode() != org.bukkit.GameMode.CREATIVE) {
                     item.setAmount(item.getAmount() - 1);
                 }
-                
+
                 // 播放爆发效果音效和粒子
                 player.getWorld().playSound(player.getLocation(), org.bukkit.Sound.ENTITY_ZOMBIE_VILLAGER_CURE, 2.0F, 1.5F);
                 player.getWorld().spawnParticle(org.bukkit.Particle.FLASH, player.getLocation().add(0, 1, 0), 50, 0.5, 0.5, 0.5, 0.1);
-                
+
                 // 影响 50 米范围内的僵尸
                 for (Entity e : player.getNearbyEntities(50, 50, 50)) {
                     if (e instanceof Zombie) {
                         Zombie z = (Zombie) e;
-                        
+
                         // 1. 30 点虚空伤害
                         z.damage(30.0);
-                        
+
                         // 2. 虚弱 255 持续 20 秒 (400 ticks)
                         z.addPotionEffect(new PotionEffect(PotionEffectType.WEAKNESS, 400, 254));
-                        
+
                         // 3. 锁定 AI 15 秒 (300 ticks)，实现“禁止使用技能”和“逃离”
                         com.frigidora.toomuchzombies.ai.ZombieAgent agent = ZombieAIManager.getInstance().getAgent(z.getUniqueId());
                         if (agent != null) {
@@ -369,16 +353,16 @@ public class GameEventListener implements Listener {
                                     }
                                 }
                             }.runTaskLater(com.frigidora.toomuchzombies.TooMuchZombies.getInstance(), 300L);
-                            
+
                             // 强制计算逃离方向
                             Vector fleeDir = z.getLocation().toVector().subtract(player.getLocation().toVector()).normalize();
                             Location fleeTarget = z.getLocation().add(fleeDir.multiply(30));
-                            
+
                             agent.moveTo(fleeTarget, 2.0);
                         }
                     }
                 }
-                
+
                 // 取消事件，防止方块放置
                 event.setCancelled(true);
             }
@@ -400,7 +384,7 @@ public class GameEventListener implements Listener {
     @EventHandler
     public void onCombat(EntityDamageByEntityEvent event) {
         notifyNoise(event.getEntity().getLocation(), 25.0, event.getDamager() instanceof Player ? (Player) event.getDamager() : null);
-        
+
         // 1. 玩家攻击僵尸：检查伤害提升
         if (event.getDamager() instanceof Player && event.getEntity() instanceof Zombie) {
             Player player = (Player) event.getDamager();
@@ -420,7 +404,7 @@ public class GameEventListener implements Listener {
             if (PlayerLevelManager.getInstance().shouldTriggerDamageBoost(player)) {
                 double originalDamage = event.getDamage();
                 event.setDamage(originalDamage * 1.2); // 提升 20%
-                
+
                 // 播放效果音和粒子提醒玩家
                 player.getWorld().spawnParticle(org.bukkit.Particle.CRIT, event.getEntity().getLocation().add(0, 1, 0), 10, 0.3, 0.3, 0.3, 0.1);
                 player.getWorld().playSound(player.getLocation(), org.bukkit.Sound.ENTITY_PLAYER_ATTACK_CRIT, 0.5f, 1.5f);
@@ -431,42 +415,26 @@ public class GameEventListener implements Listener {
         if (event.getEntity() instanceof Player && event.getDamager() instanceof Zombie) {
             Player player = (Player) event.getEntity();
             int level = PlayerLevelManager.getInstance().getPlayerLevel(player);
-            
+
             double reduction = 0.0;
-            
+
             // 新手保护 (< Lv3)
             if (level < 3) {
                 reduction += 0.15; // 15% 减伤
             }
-            
+
             // 绝境缓冲 (< 4.0 HP)
             if (player.getHealth() < 4.0) {
                 reduction += 0.25; // 额外 25% 减伤
             }
-            
+
             if (reduction > 0) {
                 double original = event.getDamage();
                 event.setDamage(original * (1.0 - reduction));
             }
         }
-        
-        // 3. 混乱模式减益效果
-        if (event.getDamager() instanceof Zombie && event.getEntity() instanceof Player) {
-             if (ChaosManager.getInstance().isChaosNight() && random.nextDouble() < 0.3) { // 仅在混乱之夜
-                 Player player = (Player) event.getEntity();
-                 PotionEffectType[] debuffs = {
-                     PotionEffectType.BLINDNESS,
-                     PotionEffectType.NAUSEA,
-                     PotionEffectType.HUNGER,
-                     PotionEffectType.SLOWNESS
-                 };
-                 PotionEffectType type = debuffs[random.nextInt(debuffs.length)];
-                 player.addPotionEffect(new PotionEffect(type, 100, 0)); // 5 秒
-             }
-        }
 
-        // 4. 僵尸近战减伤 (Zombie Melee Resistance)
-        // 已移至 onEntityDamage 处理 (Level >= 4)
+        // 3. 僵尸近战减伤已进一步削弱，不再附带额外事件 debuff。
     }
 
     private boolean isFrontAttack(Zombie zombie, Player attacker) {
@@ -491,15 +459,17 @@ public class GameEventListener implements Listener {
         int lv = Math.max(1, Math.min(maxLevel, level));
         NamespacedKey key = new NamespacedKey(com.frigidora.toomuchzombies.TooMuchZombies.getInstance(), "zombie_level");
         zombie.getPersistentDataContainer().set(key, PersistentDataType.INTEGER, lv);
-        
+
         // 生成概率
         double spawnChance;
         if (lv <= 1) spawnChance = 0.50;
         else if (lv >= maxLevel) spawnChance = 1.00;
         else spawnChance = 0.50 + Math.pow((lv - 1.0) / Math.max(1.0, (maxLevel - 1.0)), 0.60) * 0.50;
 
-        // Performance tuning: keep the level-based curve, but cut total zombie throughput roughly in half.
-        spawnChance *= 0.5;
+        spawnChance *= BloodMoonManager.getInstance().isBloodMoon(zombie.getWorld())
+            ? ConfigManager.getInstance().getBloodMoonMultiplier()
+            : 0.46;
+        spawnChance = Math.min(1.0, spawnChance);
 
         if (random.nextDouble() > spawnChance) {
             if (event != null) event.setCancelled(true);
@@ -627,11 +597,9 @@ public class GameEventListener implements Listener {
     @EventHandler
     public void onExplode(EntityExplodeEvent event) {
         notifyNoise(event.getLocation(), 40.0, null);
-        
-        // 防止僵尸 TNT 破坏方块
-        if (event.getEntity() instanceof org.bukkit.entity.TNTPrimed) {
-            org.bukkit.entity.TNTPrimed tnt = (org.bukkit.entity.TNTPrimed) event.getEntity();
-            if (tnt.hasMetadata("ZombieTNT")) {
+
+        if (event.getEntity() instanceof org.bukkit.entity.TNTPrimed tnt && tnt.hasMetadata("ZombieTNT")) {
+            if (com.frigidora.toomuchzombies.mechanics.BeaconManager.getInstance().isNearActiveBeacon(event.getLocation(), 50.0)) {
                 event.blockList().clear();
             }
         }
@@ -661,7 +629,16 @@ public class GameEventListener implements Listener {
 
             if (sourcePlayer != null && sourcePlayer.isValid() && !sourcePlayer.isDead()) {
                 double distSq = agent.getZombie().getLocation().distanceSquared(sourcePlayer.getLocation());
-                if (distSq <= Math.max(100.0, range * range * 0.64) || agent.getZombie().hasLineOfSight(sourcePlayer)) {
+                boolean strongSignal = distSq <= Math.max(64.0, range * range * 0.36) || agent.getZombie().hasLineOfSight(sourcePlayer);
+                boolean sameTarget = currentTarget != null && sourcePlayer.getUniqueId().equals(currentTarget.getUniqueId());
+                boolean shouldRetarget = !hasValidTarget || sameTarget;
+
+                if (hasValidTarget && currentTarget != null && currentTarget.getWorld().equals(sourcePlayer.getWorld())) {
+                    double currentDistSq = agent.getZombie().getLocation().distanceSquared(currentTarget.getLocation());
+                    shouldRetarget = shouldRetarget || distSq + 9.0 < currentDistSq;
+                }
+
+                if (strongSignal && shouldRetarget) {
                     agent.clearInvestigationTarget();
                     agent.setTargetEntity(sourcePlayer);
                     agent.setTargetLocation(sourcePlayer.getLocation());
@@ -671,7 +648,7 @@ public class GameEventListener implements Listener {
             }
 
             if (!hasValidTarget) {
-                agent.setInvestigationTarget(location, 4000L);
+                agent.setInvestigationTarget(location, 3500L);
             }
         }
     }

@@ -142,6 +142,22 @@ public class ZombieFactory {
             return false;
         }
 
+        if (Math.abs(loc.getBlockY() - nearest.getLocation().getBlockY()) > cfg.getSpawnMaxYDiff()) {
+            reject("y_diff");
+            return false;
+        }
+
+        Location adjusted = NightHordeManager.getInstance() != null
+            ? NightHordeManager.getInstance().findReachableSpawnNearPlayer(nearest, loc.clone())
+            : null;
+        if (adjusted == null) {
+            reject("unreachable_vertical");
+            return false;
+        }
+        loc.setX(adjusted.getX());
+        loc.setY(adjusted.getY());
+        loc.setZ(adjusted.getZ());
+
         int nearbyManaged = 0;
         for (Entity e : nearest.getNearbyEntities(96, 96, 96)) {
             if (e instanceof Zombie z) {
@@ -431,7 +447,7 @@ public class ZombieFactory {
         int lv = Math.max(1, Math.min(maxLevel, level));
         double t = (lv - 1.0) / Math.max(1.0, maxLevel - 1.0);
 
-        double health = (14.0 + Math.pow(t, 1.08) * 70.0) * 0.4;
+        double health = (12.0 + Math.pow(t, 1.06) * 48.0) * 0.38;
         if (lv <= 4) {
             health *= (0.90 + RANDOM.nextDouble() * 0.20);
         }
@@ -442,22 +458,31 @@ public class ZombieFactory {
         }
 
         if (zombie.getAttribute(Attribute.GENERIC_ATTACK_DAMAGE) != null) {
-            zombie.getAttribute(Attribute.GENERIC_ATTACK_DAMAGE).setBaseValue(6.0 + t * 18.0);
+            double bloodMoonBonus = BloodMoonManager.getInstance().isBloodMoon(zombie.getWorld()) ? 1.15 : 1.0;
+            zombie.getAttribute(Attribute.GENERIC_ATTACK_DAMAGE).setBaseValue((4.5 + t * 12.0) * bloodMoonBonus);
         }
         if (zombie.getAttribute(Attribute.GENERIC_MOVEMENT_SPEED) != null) {
-            zombie.getAttribute(Attribute.GENERIC_MOVEMENT_SPEED).setBaseValue(0.23 + t * 0.12);
+            zombie.getAttribute(Attribute.GENERIC_MOVEMENT_SPEED).setBaseValue(0.22 + t * 0.08);
         }
         if (zombie.getAttribute(Attribute.GENERIC_ARMOR) != null) {
-            zombie.getAttribute(Attribute.GENERIC_ARMOR).setBaseValue(0.5 + t * 4.0);
+            double armor = 0.0 + t * 2.2;
+            if (BloodMoonManager.getInstance().isBloodMoon(zombie.getWorld())) armor += 0.8;
+            zombie.getAttribute(Attribute.GENERIC_ARMOR).setBaseValue(armor);
         }
         if (zombie.getAttribute(Attribute.GENERIC_ARMOR_TOUGHNESS) != null) {
-            zombie.getAttribute(Attribute.GENERIC_ARMOR_TOUGHNESS).setBaseValue(t * 1.5);
+            zombie.getAttribute(Attribute.GENERIC_ARMOR_TOUGHNESS).setBaseValue(t * 0.8);
         }
         if (zombie.getAttribute(Attribute.GENERIC_KNOCKBACK_RESISTANCE) != null) {
-            zombie.getAttribute(Attribute.GENERIC_KNOCKBACK_RESISTANCE).setBaseValue(Math.min(0.35, t * 0.35));
+            zombie.getAttribute(Attribute.GENERIC_KNOCKBACK_RESISTANCE).setBaseValue(Math.min(0.18, t * 0.18));
         }
         if (zombie.getAttribute(Attribute.GENERIC_FOLLOW_RANGE) != null) {
             zombie.getAttribute(Attribute.GENERIC_FOLLOW_RANGE).setBaseValue(40.0 + t * 80.0);
+        }
+
+        if (BloodMoonManager.getInstance().isBloodMoon(zombie.getWorld()) && zombie.getAttribute(Attribute.GENERIC_MAX_HEALTH) != null) {
+            double bonusHealth = zombie.getAttribute(Attribute.GENERIC_MAX_HEALTH).getBaseValue() * ConfigManager.getInstance().getBloodMoonHealthMultiplier();
+            zombie.getAttribute(Attribute.GENERIC_MAX_HEALTH).setBaseValue(Math.min(256.0, bonusHealth));
+            zombie.setHealth(Math.min(zombie.getHealth() * ConfigManager.getInstance().getBloodMoonHealthMultiplier(), zombie.getAttribute(Attribute.GENERIC_MAX_HEALTH).getValue()));
         }
 
         applyLevelSkills(zombie, lv);
@@ -478,9 +503,8 @@ public class ZombieFactory {
         if (level >= 11) {
             zombie.addPotionEffect(new PotionEffect(PotionEffectType.FIRE_RESISTANCE, Integer.MAX_VALUE, 0, true, false, false));
         }
-        if (level >= 12) {
+        if (level >= 12 && BloodMoonManager.getInstance().isBloodMoon(zombie.getWorld())) {
             zombie.addPotionEffect(new PotionEffect(PotionEffectType.REGENERATION, Integer.MAX_VALUE, 1, true, false, false));
-            zombie.addPotionEffect(new PotionEffect(PotionEffectType.RESISTANCE, Integer.MAX_VALUE, 0, true, false, false));
         }
     }
 

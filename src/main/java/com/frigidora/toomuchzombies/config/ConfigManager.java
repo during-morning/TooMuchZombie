@@ -284,6 +284,26 @@ public class ConfigManager {
         return config.getBoolean("spawn.algorithm.enforce-night-only", false);
     }
 
+    public int getSpawnMaxYDiff() {
+        return clampInt(config.getInt("spawn.algorithm.max-y-diff", 18), 0, 64);
+    }
+
+    public int getSpawnVerticalSearchRange() {
+        return clampInt(config.getInt("spawn.algorithm.vertical-search-range", 8), 2, 32);
+    }
+
+    public long getRecoveryRepathCooldownMs() {
+        return clampInt(config.getInt("zombie-ai.recovery.repath-cooldown-ms", 700), 100, 10000);
+    }
+
+    public int getRecoveryStuckWarningTicks() {
+        return clampInt(config.getInt("zombie-ai.recovery.stuck-warning-ticks", 35), 5, 200);
+    }
+
+    public int getRecoveryStuckTeleportTicks() {
+        return clampInt(config.getInt("zombie-ai.recovery.stuck-teleport-ticks", 110), 20, 400);
+    }
+
     public double getThreatXpWeight() {
         return clampDouble(config.getDouble("level.threat.xp-weight", 0.22), 0.0, 2.0);
     }
