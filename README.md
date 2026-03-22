@@ -4,6 +4,7 @@ Paper 1.21+ 的僵尸 AI 强化插件。
 
 ## 核心特性
 - 统一 encounter 等级：玩家威胁与附近玩家聚合后决定僵尸等级。
+- 事件系统已收敛为仅保留血月事件，入夜时会提示“血月降临了...”。
 - 强化等级系统：玩家等级支持 `level.max`（默认 12），并纳入伤害输出与 K/D 表现。
 - 生成 pipeline：夜晚门控、全局上限、玩家附近上限、chunk 冷却、预算池、接受率。
 - 能力仲裁：`SURVIVE / STRUCTURE / CHASE_COMBAT / TARGET_SEARCH`，降低路径与战斗冲突。
@@ -20,7 +21,7 @@ Paper 1.21+ 的僵尸 AI 强化插件。
 - `/za spawn <role>`
 - `/za info`
 - `/za killall`
-- `/za forcechaos`
+- `/za forcebloodmoon`（兼容旧别名 `/za forcechaos`）
 - `/za reload`
 - `/za level set <player> <level>`
 - `/za level info [player]`

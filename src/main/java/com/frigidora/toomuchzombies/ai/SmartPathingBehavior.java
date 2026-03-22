@@ -38,6 +38,11 @@ public class SmartPathingBehavior {
         ZombieBreakerBehavior breaker = agent.getBreakerBehavior();
         ZombieSuicideBehavior suicide = agent.getSuicideBehavior();
         ZombieCooperationBehavior cooperation = agent.getCooperationBehavior();
+        LivingEntity currentTarget = agent.getTargetEntity() != null ? agent.getTargetEntity() : z.getTarget();
+        if (currentTarget != null && currentTarget.isValid() && currentTarget.getWorld().equals(z.getWorld())) {
+            agent.setLastKnownTargetLocation(currentTarget.getLocation());
+            targetLoc = currentTarget.getLocation();
+        }
 
         final boolean terrainModificationEnabled = ConfigManager.getInstance().isTerrainModificationEnabled();
         if (!terrainModificationEnabled) {
@@ -93,7 +98,6 @@ public class SmartPathingBehavior {
              Location nearestBeacon = BeaconManager.getInstance().getNearestActiveBeacon(z.getLocation(), 24.0);
              if (nearestBeacon != null) {
                  double beaconDistSq = z.getLocation().distanceSquared(nearestBeacon);
-                 LivingEntity currentTarget = agent.getTargetEntity() != null ? agent.getTargetEntity() : z.getTarget();
                  boolean closeCombat = currentTarget != null
                      && currentTarget.isValid()
                      && currentTarget.getWorld().equals(z.getWorld())
@@ -150,7 +154,6 @@ public class SmartPathingBehavior {
             return;
         }
 
-        LivingEntity currentTarget = agent.getTargetEntity() != null ? agent.getTargetEntity() : z.getTarget();
         boolean meleeEngaged = currentTarget != null
             && currentTarget.isValid()
             && currentTarget.getWorld().equals(z.getWorld())
@@ -163,6 +166,17 @@ public class SmartPathingBehavior {
                 z.getPathfinder().stopPathfinding();
             }
             return;
+        }
+
+        if (agent.getTicksStuck() >= ConfigManager.getInstance().getRecoveryStuckWarningTicks()) {
+            if (terrainModificationEnabled && (agent.getRole() == ZombieRole.BUILDER || agent.getRole() == ZombieRole.MINER)) {
+                builder.setActive(true);
+                builder.tick();
+                return;
+            }
+            if (agent.checkAndResetSkillCooldown("FORCED_REPATH", ConfigManager.getInstance().getRecoveryRepathCooldownMs())) {
+                agent.moveTo(targetLoc, 1.1);
+            }
         }
 
         LivingEntity focusTarget = cooperation.getFocusTarget();
@@ -205,9 +219,8 @@ public class SmartPathingBehavior {
             agent.moveTo(flankTarget, 1.2);
         } else {
             // 确保没有被锁定移动
-            if (!agent.isAiPaused() && z.getTarget() != null) {
-                // 主动追击，避免原版寻路与自定义协作行为冲突导致来回踱步。
-                agent.moveTo(targetLoc, 1.0);
+            if (!agent.isAiPaused() && currentTarget != null) {
+                agent.moveTo(currentTarget.getLocation(), currentTarget.getLocation().distanceSquared(z.getLocation()) > 36.0 ? 1.0 : 1.08);
             }
         }
         

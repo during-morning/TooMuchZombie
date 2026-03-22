@@ -96,16 +96,17 @@ public class NightHordeManager {
         return null;
     }
 
-    private Location findReachableSpawnNearPlayer(Player player, Location base) {
+    public Location findReachableSpawnNearPlayer(Player player, Location base) {
         if (base.getWorld() == null) {
             return null;
         }
 
         int playerY = player.getLocation().getBlockY();
-        int minY = Math.max(base.getWorld().getMinHeight() + 1, playerY - 8);
-        int maxY = Math.min(base.getWorld().getMaxHeight() - 2, playerY + 8);
+        int searchRange = com.frigidora.toomuchzombies.config.ConfigManager.getInstance().getSpawnVerticalSearchRange();
+        int minY = Math.max(base.getWorld().getMinHeight() + 1, playerY - searchRange);
+        int maxY = Math.min(base.getWorld().getMaxHeight() - 2, playerY + searchRange);
 
-        for (int offset = 0; offset <= 8; offset++) {
+        for (int offset = 0; offset <= searchRange; offset++) {
             for (int sign : new int[] {1, -1}) {
                 int y = playerY + offset * sign;
                 if (y < minY || y > maxY) {
