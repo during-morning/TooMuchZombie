@@ -1,8 +1,11 @@
 package com.frigidora.toomuchzombies.ai;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.bukkit.Location;
 import org.bukkit.GameMode;
@@ -57,6 +60,11 @@ public class ZombieAIManager implements Listener {
     // --- 性能优化：分片列表 (Sharded Lists) ---
     // 为了实现真正的 O(N/M) 分时调度，我们需要直接遍历对应时间片的列表，而不是遍历所有 Key 然后取模
     private final java.util.List<UUID>[] shardedAgents = new java.util.List[TIME_SLICES];
+    private final Map<UUID, UUID> plannedTargets = new ConcurrentHashMap<>();
+    private final AtomicBoolean asyncPlanning = new AtomicBoolean(false);
+
+    private record PlayerSnapshot(UUID uuid, UUID worldId, double x, double y, double z, double health, double maxHealth, int foodLevel) {}
+    private record AgentSnapshot(UUID uuid, UUID worldId, double x, double y, double z, UUID currentTargetId) {}
     
     public java.util.Collection<ZombieAgent> getNearbyAgents(Location loc, double range) {
         // 使用 SpatialPartition 快速查找
@@ -89,7 +97,7 @@ public class ZombieAIManager implements Listener {
             Zombie z = (Zombie) event.getEntity();
             ZombieAgent agent = getAgent(z.getUniqueId());
             if (agent != null) {
-                agent.recordDamage(event.getDamager().getLocation());
+                agent.recordDamage(event.getDamager() != null ? event.getDamager().getLocation() : null);
             }
         }
     }
@@ -356,17 +364,14 @@ public class ZombieAIManager implements Listener {
     }
 
     private void tick() {
-        // 强制开启时间流动
         for (org.bukkit.World world : org.bukkit.Bukkit.getWorlds()) {
             if (world.getGameRuleValue(org.bukkit.GameRule.DO_DAYLIGHT_CYCLE) == Boolean.FALSE) {
                 world.setGameRule(org.bukkit.GameRule.DO_DAYLIGHT_CYCLE, true);
             }
         }
 
-        // 更新分时索引
         tickIndex = (tickIndex + 1) % TIME_SLICES;
-        
-        // 清理过期数据 (每秒一次)
+
         if (tickIndex == 0 && org.bukkit.Bukkit.getCurrentTick() % 20 == 0) {
             long now = System.currentTimeMillis();
             reservedBuildSpots.entrySet().removeIf(entry -> now - entry.getValue() > 5000);
@@ -376,42 +381,27 @@ public class ZombieAIManager implements Listener {
             breachRoles.keySet().removeIf(id -> !breachRoleLeaseUntil.containsKey(id));
         }
 
-        // 全局逻辑
         int currentCount = agents.size();
-        // 简单的负载检测：如果实体数超过 1000，视为高负载
-        // 如果有 TPS API (Paper) 可以用，但为了兼容性我们用实体数作为代理
-        boolean highLoad = currentCount > 1000;
-        
-        int globalHardCap = highLoad ? 1500 : 2000;
-        int perPlayerCap = highLoad ? 150 : 300;
-        int perPlayerRange = highLoad ? 60 : 100; // 高负载时缩小范围
-        
-        // 性能异步检查
-        // 注意：移除实体必须在主线程进行，但计算可以是异步的。
-        // 为了结构简单，我们在这里运行检查，但保持其高效。
-        
-        if (org.bukkit.Bukkit.getCurrentTick() % 20 != 0) {
-             // 即使不是检查 tick，也要执行分时调度的 AI 逻辑
-             processAgents(highLoad);
-             return; 
+        boolean highLoad = currentCount > 800;
+        int globalHardCap = highLoad ? 1100 : 1500;
+
+        if (org.bukkit.Bukkit.getCurrentTick() % 4 == 0) {
+            scheduleAsyncPlanning();
         }
-        
-        // 1. 检查全局硬上限
-        if (currentCount > globalHardCap) {
-             // 移除随机多余部分
-             int toRemove = currentCount - globalHardCap;
-             for (UUID uuid : agents.keySet()) {
-                 if (toRemove <= 0) break;
-                 ZombieAgent agent = agents.get(uuid);
-                 if (agent != null && agent.getZombie().isValid()) {
-                     agent.getZombie().remove();
-                     agents.remove(uuid);
-                     toRemove--;
-                 }
-             }
+
+        if (org.bukkit.Bukkit.getCurrentTick() % 20 == 0 && currentCount > globalHardCap) {
+            int toRemove = currentCount - globalHardCap;
+            for (UUID uuid : agents.keySet()) {
+                if (toRemove <= 0) break;
+                ZombieAgent agent = agents.get(uuid);
+                if (agent != null && agent.getZombie().isValid()) {
+                    agent.getZombie().remove();
+                    unregisterZombie(uuid);
+                    toRemove--;
+                }
+            }
         }
-        
-        // 执行 AI 逻辑 (在检查 tick 也需要执行)
+
         processAgents(highLoad);
     }
     
@@ -430,15 +420,13 @@ public class ZombieAIManager implements Listener {
                 continue;
             }
             
-            // 卡死检测
-            if (agent.isStuck()) {
-                agent.getZombie().remove();
-                agents.remove(uuid);
-                currentShard.remove(uuid);
-                continue;
-            }
-            
             Zombie z = agent.getZombie();
+
+            if (agent.getTicksStuck() >= ConfigManager.getInstance().getRecoveryStuckTeleportTicks()) {
+                if (tryRecoverStuckAgent(agent)) {
+                    continue;
+                }
+            }
             
             // 更新空间分区位置
             spatialPartition.update(agent);
@@ -446,7 +434,7 @@ public class ZombieAIManager implements Listener {
             // 无效实体清理 (Useless Check)
             // 优化：仅对每 100 tick (约5秒) 且没有目标的僵尸执行检查
             // 利用 checkAndResetSkillCooldown 实现节流
-            if (agent.getTargetEntity() == null && agent.checkAndResetSkillCooldown("USELESS_CHECK", 5000)) {
+            if ((highLoad || agent.getTargetEntity() == null) && agent.checkAndResetSkillCooldown("USELESS_CHECK", highLoad ? 3000 : 5000)) {
                 // 检查是否有玩家在附近 (64格)
                 boolean playerNearby = false;
                 for (org.bukkit.entity.Player p : org.bukkit.Bukkit.getOnlinePlayers()) {
@@ -528,39 +516,60 @@ public class ZombieAIManager implements Listener {
             return;
         }
 
-        double maxRange = Math.min(ConfigManager.getInstance().getTargetingMaxRange(), ConfigManager.getInstance().getHiveMindSensorRange());
-        double rangeSq = maxRange * maxRange;
         LivingEntity current = agent.getTargetEntity();
-        double currentScore = current != null && current.isValid() && current.getWorld().equals(zombie.getWorld())
-            ? evaluateTargetScore(zombie, current)
-            : Double.NEGATIVE_INFINITY;
-
         LivingEntity best = null;
-        double bestScore = Double.NEGATIVE_INFINITY;
-        for (Player player : zombie.getWorld().getPlayers()) {
-            if (player.isDead() || player.getGameMode() == GameMode.SPECTATOR) {
-                continue;
-            }
-            if (player.getLocation().distanceSquared(zombie.getLocation()) > rangeSq) {
-                continue;
-            }
-            double score = evaluateTargetScore(zombie, player);
-            if (score > bestScore) {
-                bestScore = score;
-                best = player;
+        UUID plannedId = plannedTargets.get(agent.getUuid());
+        if (plannedId != null) {
+            org.bukkit.entity.Player planned = org.bukkit.Bukkit.getPlayer(plannedId);
+            if (planned != null && planned.isValid() && !planned.isDead() && planned.getWorld().equals(zombie.getWorld())) {
+                best = planned;
             }
         }
 
         if (best == null) {
-            return;
+            double maxRange = Math.min(ConfigManager.getInstance().getTargetingMaxRange(), ConfigManager.getInstance().getHiveMindSensorRange());
+            double rangeSq = maxRange * maxRange;
+            double currentScore = current != null && current.isValid() && current.getWorld().equals(zombie.getWorld())
+                ? evaluateTargetScore(zombie, current)
+                : Double.NEGATIVE_INFINITY;
+
+            double bestScore = Double.NEGATIVE_INFINITY;
+            for (Player player : zombie.getWorld().getPlayers()) {
+                if (player.isDead() || player.getGameMode() == GameMode.SPECTATOR) {
+                    continue;
+                }
+                if (player.getLocation().distanceSquared(zombie.getLocation()) > rangeSq) {
+                    continue;
+                }
+                double score = evaluateTargetScore(zombie, player);
+                if (score > bestScore) {
+                    bestScore = score;
+                    best = player;
+                }
+            }
+
+            if (best == null) {
+                return;
+            }
+
+            double delta = ConfigManager.getInstance().getTargetingSwitchScoreDelta();
+            if (current != null && current.isValid() && !best.equals(current) && bestScore < currentScore + delta) {
+                return;
+            }
         }
 
-        double delta = ConfigManager.getInstance().getTargetingSwitchScoreDelta();
-        if (current == null || !current.isValid() || best.equals(current) || bestScore >= currentScore + delta) {
-            zombie.setTarget(best);
-            agent.setTargetEntity(best);
-            agent.setLastKnownTargetLocation(best.getLocation());
+        if (current != null && current.isValid() && !current.isDead() && current.getWorld().equals(zombie.getWorld()) && !best.equals(current)) {
+            double currentDistSq = zombie.getLocation().distanceSquared(current.getLocation());
+            double bestDistSq = zombie.getLocation().distanceSquared(best.getLocation());
+            if (bestDistSq >= currentDistSq - 4.0) {
+                return;
+            }
         }
+
+        zombie.setTarget(best);
+        agent.clearInvestigationTarget();
+        agent.setTargetEntity(best);
+        agent.setLastKnownTargetLocation(best.getLocation());
     }
 
     private double evaluateTargetScore(Zombie zombie, LivingEntity target) {
@@ -579,6 +588,122 @@ public class ZombieAIManager implements Listener {
         return distanceScore + healthScore + hungerScore + lineOfSightBonus;
     }
     
+    private void scheduleAsyncPlanning() {
+        if (!asyncPlanning.compareAndSet(false, true)) {
+            return;
+        }
+
+        List<PlayerSnapshot> playerSnapshots = new ArrayList<>();
+        for (Player player : org.bukkit.Bukkit.getOnlinePlayers()) {
+            if (player.isDead() || player.getGameMode() == GameMode.SPECTATOR) {
+                continue;
+            }
+            double maxHealth = player.getAttribute(org.bukkit.attribute.Attribute.GENERIC_MAX_HEALTH) != null
+                ? player.getAttribute(org.bukkit.attribute.Attribute.GENERIC_MAX_HEALTH).getValue()
+                : 20.0;
+            playerSnapshots.add(new PlayerSnapshot(
+                player.getUniqueId(),
+                player.getWorld().getUID(),
+                player.getLocation().getX(),
+                player.getLocation().getY(),
+                player.getLocation().getZ(),
+                player.getHealth(),
+                maxHealth,
+                player.getFoodLevel()));
+        }
+
+        List<AgentSnapshot> agentSnapshots = new ArrayList<>(agents.size());
+        for (ZombieAgent agent : agents.values()) {
+            Zombie zombie = agent.getZombie();
+            if (!zombie.isValid()) {
+                continue;
+            }
+            LivingEntity current = agent.getTargetEntity();
+            agentSnapshots.add(new AgentSnapshot(
+                agent.getUuid(),
+                zombie.getWorld().getUID(),
+                zombie.getLocation().getX(),
+                zombie.getLocation().getY(),
+                zombie.getLocation().getZ(),
+                current != null ? current.getUniqueId() : null));
+        }
+
+        org.bukkit.Bukkit.getScheduler().runTaskAsynchronously(TooMuchZombies.getInstance(), () -> {
+            try {
+                Map<UUID, UUID> newPlans = new java.util.HashMap<>();
+                double maxRange = Math.min(ConfigManager.getInstance().getTargetingMaxRange(), ConfigManager.getInstance().getHiveMindSensorRange());
+                double rangeSq = maxRange * maxRange;
+                for (AgentSnapshot agent : agentSnapshots) {
+                    PlayerSnapshot best = null;
+                    double bestScore = Double.NEGATIVE_INFINITY;
+                    for (PlayerSnapshot player : playerSnapshots) {
+                        if (!agent.worldId().equals(player.worldId())) {
+                            continue;
+                        }
+                        double dx = player.x() - agent.x();
+                        double dy = player.y() - agent.y();
+                        double dz = player.z() - agent.z();
+                        double distSq = dx * dx + dy * dy + dz * dz;
+                        if (distSq > rangeSq || Math.abs(dy) > 28.0) {
+                            continue;
+                        }
+                        double distanceScore = 1.0 / Math.max(1.0, Math.sqrt(distSq));
+                        double healthScore = 1.0 - Math.max(0.0, Math.min(1.0, player.health() / Math.max(1.0, player.maxHealth())));
+                        double hungerScore = (1.0 - Math.max(0.0, Math.min(1.0, player.foodLevel() / 20.0))) * 0.35;
+                        double stickiness = player.uuid().equals(agent.currentTargetId()) ? 0.18 : 0.0;
+                        double verticalPenalty = Math.abs(dy) * 0.015;
+                        double score = distanceScore + healthScore + hungerScore + stickiness - verticalPenalty;
+                        if (score > bestScore) {
+                            bestScore = score;
+                            best = player;
+                        }
+                    }
+                    if (best != null) {
+                        newPlans.put(agent.uuid(), best.uuid());
+                    }
+                }
+                plannedTargets.clear();
+                plannedTargets.putAll(newPlans);
+            } finally {
+                asyncPlanning.set(false);
+            }
+        });
+    }
+
+    private boolean tryRecoverStuckAgent(ZombieAgent agent) {
+        Zombie zombie = agent.getZombie();
+        LivingEntity target = agent.getTargetEntity() != null ? agent.getTargetEntity() : zombie.getTarget();
+        if (target == null || !target.isValid() || !target.getWorld().equals(zombie.getWorld())) {
+            return false;
+        }
+
+        if (agent.checkAndResetSkillCooldown("STUCK_RECOVER", ConfigManager.getInstance().getRecoveryRepathCooldownMs())) {
+            agent.moveTo(target.getLocation(), 1.12);
+        }
+
+        if (agent.getTicksStuck() < ConfigManager.getInstance().getRecoveryStuckTeleportTicks()) {
+            return false;
+        }
+
+        org.bukkit.util.Vector step = target.getLocation().toVector().subtract(zombie.getLocation().toVector()).setY(0);
+        if (step.lengthSquared() < 0.05) {
+            return false;
+        }
+        step.normalize().multiply(1.2);
+        Location fallback = zombie.getLocation().clone().add(step);
+        if (!fallback.getBlock().isPassable() || !fallback.clone().add(0, 1, 0).getBlock().isPassable()) {
+            return false;
+        }
+        if (!fallback.clone().add(0, -1, 0).getBlock().getType().isSolid()) {
+            return false;
+        }
+
+        zombie.teleport(fallback);
+        agent.resetStuckCounter();
+        agent.moveTo(target.getLocation(), 1.15);
+        return true;
+    }
+
     public void alertZombie(Zombie zombie, Location location) {
         ZombieAgent agent = getAgent(zombie.getUniqueId());
         if (agent != null) {

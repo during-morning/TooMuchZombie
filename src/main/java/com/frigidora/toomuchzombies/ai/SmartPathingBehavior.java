@@ -38,6 +38,11 @@ public class SmartPathingBehavior {
         ZombieBreakerBehavior breaker = agent.getBreakerBehavior();
         ZombieSuicideBehavior suicide = agent.getSuicideBehavior();
         ZombieCooperationBehavior cooperation = agent.getCooperationBehavior();
+        LivingEntity currentTarget = agent.getTargetEntity() != null ? agent.getTargetEntity() : z.getTarget();
+        if (currentTarget != null && currentTarget.isValid() && currentTarget.getWorld().equals(z.getWorld())) {
+            agent.setLastKnownTargetLocation(currentTarget.getLocation());
+            targetLoc = currentTarget.getLocation();
+        }
 
         final boolean terrainModificationEnabled = ConfigManager.getInstance().isTerrainModificationEnabled();
         if (!terrainModificationEnabled) {
@@ -93,7 +98,6 @@ public class SmartPathingBehavior {
              Location nearestBeacon = BeaconManager.getInstance().getNearestActiveBeacon(z.getLocation(), 24.0);
              if (nearestBeacon != null) {
                  double beaconDistSq = z.getLocation().distanceSquared(nearestBeacon);
-                 LivingEntity currentTarget = agent.getTargetEntity() != null ? agent.getTargetEntity() : z.getTarget();
                  boolean closeCombat = currentTarget != null
                      && currentTarget.isValid()
                      && currentTarget.getWorld().equals(z.getWorld())
@@ -150,7 +154,6 @@ public class SmartPathingBehavior {
             return;
         }
 
-        LivingEntity currentTarget = agent.getTargetEntity() != null ? agent.getTargetEntity() : z.getTarget();
         boolean meleeEngaged = currentTarget != null
             && currentTarget.isValid()
             && currentTarget.getWorld().equals(z.getWorld())
@@ -165,9 +168,25 @@ public class SmartPathingBehavior {
             return;
         }
 
+        if (agent.getTicksStuck() >= ConfigManager.getInstance().getRecoveryStuckWarningTicks()) {
+            if (terrainModificationEnabled && (agent.getRole() == ZombieRole.BUILDER || agent.getRole() == ZombieRole.MINER)) {
+                builder.setActive(true);
+                builder.tick();
+                return;
+            }
+            if (agent.checkAndResetSkillCooldown("FORCED_REPATH", ConfigManager.getInstance().getRecoveryRepathCooldownMs())) {
+                agent.moveTo(targetLoc, 1.1);
+            }
+        }
+
         LivingEntity focusTarget = cooperation.getFocusTarget();
-        if (focusTarget != null && focusTarget.isValid()) {
+        boolean allowFormation = focusTarget != null
+            && focusTarget.isValid()
+            && focusTarget.getWorld().equals(z.getWorld())
+            && z.getLocation().distanceSquared(focusTarget.getLocation()) >= 8.0 * 8.0;
+        if (allowFormation) {
             applyFocusFormation(agent, focusTarget, cooperation.getFormationSlotIndex());
+            return;
         }
 
         // 8. 决策：是否切换到“建筑师模式” (Structural Pathing)
@@ -198,16 +217,27 @@ public class SmartPathingBehavior {
         }
 
         // 侧翼逻辑 (保持不变)
-        if (agent.isFlanking()) {
-            Vector toTarget = targetLoc.toVector().subtract(z.getLocation().toVector()).normalize();
-            Vector right = new Vector(-toTarget.getZ(), 0, toTarget.getX()).normalize();
-            Location flankTarget = z.getLocation().add(right.multiply(5));
-            agent.moveTo(flankTarget, 1.2);
+        boolean canFlank = agent.isFlanking()
+            && currentTarget != null
+            && currentTarget.isValid()
+            && currentTarget.getWorld().equals(z.getWorld())
+            && z.getLocation().distanceSquared(currentTarget.getLocation()) >= 9.0 * 9.0;
+        if (canFlank) {
+            Vector toTarget = targetLoc.toVector().subtract(z.getLocation().toVector()).setY(0);
+            if (toTarget.lengthSquared() > 0.01) {
+                toTarget.normalize();
+                Vector right = new Vector(-toTarget.getZ(), 0, toTarget.getX()).normalize();
+                Location flankTarget = currentTarget.getLocation().clone().add(right.multiply(3.0));
+                flankTarget.setY(z.getLocation().getY());
+                agent.moveTo(flankTarget, 1.12);
+                return;
+            }
         } else {
-            // 确保没有被锁定移动
-            if (!agent.isAiPaused() && z.getTarget() != null) {
-                // 主动追击，避免原版寻路与自定义协作行为冲突导致来回踱步。
-                agent.moveTo(targetLoc, 1.0);
+            agent.setFlanking(false);
+            if (!agent.isAiPaused() && currentTarget != null) {
+                Location chaseTarget = currentTarget.getLocation();
+                double distanceSq = chaseTarget.distanceSquared(z.getLocation());
+                agent.moveTo(chaseTarget, distanceSq > 36.0 ? 1.0 : 1.1);
             }
         }
         

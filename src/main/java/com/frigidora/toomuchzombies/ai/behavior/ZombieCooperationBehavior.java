@@ -112,9 +112,8 @@ public class ZombieCooperationBehavior {
         allies.add(zombie.getUniqueId());
         allies.sort(java.util.Comparator.comparing(UUID::toString));
         int base = Math.max(0, allies.indexOf(zombie.getUniqueId()));
-        int rotatingPhase = (int) ((System.currentTimeMillis() / 3500L) % 6L);
         int roleBias = agent.getRole() == ZombieRole.ARCHER ? 2 : (agent.getRole() == ZombieRole.COMBAT ? 1 : 0);
-        return base + rotatingPhase + roleBias;
+        return base + roleBias;
     }
 
     private boolean tryRetreatRegroup() {
@@ -219,6 +218,10 @@ public class ZombieCooperationBehavior {
 
     private boolean tryFlankSync() {
         if (zombie.getTarget() == null) return false;
+        if (zombie.getLocation().distanceSquared(zombie.getTarget().getLocation()) <= 8.0 * 8.0) {
+            agent.setFlanking(false);
+            return false;
+        }
 
         double range = ConfigManager.getInstance().getCoopFlankSyncRange();
         int engaged = 0;
@@ -232,7 +235,7 @@ public class ZombieCooperationBehavior {
             }
         }
 
-        if (engaged >= 2) {
+        if (engaged >= 2 && zombie.getLocation().distanceSquared(zombie.getTarget().getLocation()) >= 10.0 * 10.0) {
             agent.setFlanking(true);
             return true;
         }
@@ -244,6 +247,7 @@ public class ZombieCooperationBehavior {
     private boolean tryEncirclePressure() {
         LivingEntity target = zombie.getTarget();
         if (target == null || !target.isValid()) return false;
+        if (zombie.getLocation().distanceSquared(target.getLocation()) <= 9.0 * 9.0) return false;
 
         double range = ConfigManager.getInstance().getCoopEncircleRange();
         int allies = 0;

@@ -152,7 +152,7 @@ public class ZombieAgent {
     }
 
     public void setLastKnownTargetLocation(Location lastKnownTargetLocation) {
-        this.lastKnownTargetLocation = lastKnownTargetLocation;
+        this.lastKnownTargetLocation = lastKnownTargetLocation == null ? null : lastKnownTargetLocation.clone();
         this.lastSeenTargetTime = System.currentTimeMillis();
     }
     
@@ -284,6 +284,11 @@ public class ZombieAgent {
     
     public int getTicksStuck() {
         return stuckTicks;
+    }
+
+    public void resetStuckCounter() {
+        lastStuckCheckLocation = zombie != null ? zombie.getLocation() : null;
+        stuckTicks = 0;
     }
 
     public boolean isStuck() {
