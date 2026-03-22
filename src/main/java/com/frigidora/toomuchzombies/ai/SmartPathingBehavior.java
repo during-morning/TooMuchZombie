@@ -233,11 +233,9 @@ public class SmartPathingBehavior {
                 return;
             }
         } else {
-            agent.setFlanking(false);
+            // 确保没有被锁定移动
             if (!agent.isAiPaused() && currentTarget != null) {
-                Location chaseTarget = currentTarget.getLocation();
-                double distanceSq = chaseTarget.distanceSquared(z.getLocation());
-                agent.moveTo(chaseTarget, distanceSq > 36.0 ? 1.0 : 1.1);
+                agent.moveTo(currentTarget.getLocation(), currentTarget.getLocation().distanceSquared(z.getLocation()) > 36.0 ? 1.0 : 1.08);
             }
         }
         
