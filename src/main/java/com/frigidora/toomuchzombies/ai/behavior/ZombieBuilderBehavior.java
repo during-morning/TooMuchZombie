@@ -275,11 +275,9 @@ public class ZombieBuilderBehavior {
              }
         }
         
-        // 目标高度修正：如果目标高度与我们差不多，但我们需要“高空压制”，则虚拟抬高目标
-        // 用户反馈：不要在地面搭桥。这意味着我们应该优先保持在上方，或者向上搭建。
-        // 如果我们不是远高于目标（比如 < 5 格），且水平距离较远，我们应该倾向于向上搭建，而不是水平。
-        int desiredY = target.getBlockY() + 8; // 理想高度：目标上方 8 格
-        int dyToDesired = desiredY - selfPos.y; // > 0 意味着我们需要上升
+        // 自适应高度策略：
+        // 远距离时只保持小幅高差，近距离则趋向目标同层，避免无意义“上天桥”。
+        int horizontalDist = Math.max(Math.abs(dx), Math.abs(dz));
         
         Block frontBlock = standBlock.getRelative(dir);
         Block frontDownBlock = frontBlock.getRelative(BlockFace.DOWN);
@@ -289,12 +287,11 @@ public class ZombieBuilderBehavior {
 
         // 1. 探测障碍物 (Wall Detection)
         if (frontBlock.getType().isSolid() || frontUpBlock.getType().isSolid()) {
-            // 前方有墙，且目标在上方或水平，则向上搭建
-            // 只要我们没有远高于目标，遇到障碍物就向上
-            if (dy > -5) { 
+            // 仅在确有高度需求时抬升，避免“无脑天梯”。
+            if (dy > 1 || horizontalDist > 6) { 
                 height = Height.UP;
             } else {
-                // 目标在下方，但前方有墙，可能需要先挖开或绕路，这里简单处理为 NONE (由 Breaker 挖开)
+                // 让结构流转到清障步骤，优先打通路径。
                 height = Height.NONE;
             }
         } 
@@ -325,46 +322,30 @@ public class ZombieBuilderBehavior {
                 return;
             }
             
-            // 坑洞搭建逻辑：
-            if (dyToDesired > 0) {
-                // 如果我们低于理想高度（目标+8），优先向上搭建，而不是水平搭建
-                // 这能让僵尸在跨越坑洞时顺便提升高度
+            // 坑洞搭建逻辑：默认平桥，只有明确高差才上升/下降。
+            if (dy > 1) {
                 height = Height.UP;
             } else {
-                // 我们已经足够高了
-                // 如果目标在下方
-                if (Math.abs(dx) > 8 || Math.abs(dz) > 8) {
-                    height = Height.NONE; // 保持高度天桥
-                } else {
-                    height = Height.DOWN; // 接近目标，下降
-                }
+                height = (dy < -2 && horizontalDist <= 4) ? Height.DOWN : Height.NONE;
             }
         }
         // 3. 正常地形 (前方通畅，脚下有地)
         else {
-            // 检查是否需要强制爬升以获取高度优势
-            // 如果我们低于理想高度，且水平距离还远，不要走路，而是开始搭天梯
-            if (dyToDesired > 0 && (Math.abs(dx) > 10 || Math.abs(dz) > 10)) {
-                 // 强制爬升
-                 height = Height.UP;
+            if (dy > 1) {
+                if (Math.abs(dx) <= 1 && Math.abs(dz) <= 1) height = Height.VERTICAL;
+                else height = Height.UP;
+            } else if (dy < -2 && horizontalDist <= 4) {
+                height = Height.DOWN;
             } else {
-                // 原有逻辑
-                if (dy > 1) {
-                    if (Math.abs(dx) <= 1 && Math.abs(dz) <= 1) height = Height.VERTICAL;
-                    else height = Height.UP;
-                } else if (dy < -1) {
-                    height = Height.DOWN;
-                } else {
-                    // 平地行走
-                    selfPos.x += dir.getModX();
-                    selfPos.z += dir.getModZ();
-                    Location nextLoc = new Location(zombie.getWorld(), selfPos.x + 0.5, selfPos.y, selfPos.z + 0.5);
-                    nextLoc.setYaw(getFaceYaw(dir));
-                    safeMoveTo(nextLoc, 1.2);
-                    if (target != null) ZombieAIManager.getInstance().registerBuildPath(target, nextLoc);
-                    this.currentStructure = null;
-                    return;
-                }
+                // 平地行走
+                selfPos.x += dir.getModX();
+                selfPos.z += dir.getModZ();
+                Location nextLoc = new Location(zombie.getWorld(), selfPos.x + 0.5, selfPos.y, selfPos.z + 0.5);
+                nextLoc.setYaw(getFaceYaw(dir));
+                safeMoveTo(nextLoc, 1.2);
+                if (target != null) ZombieAIManager.getInstance().registerBuildPath(target, nextLoc);
+                this.currentStructure = null;
+                return;
             }
         }
 

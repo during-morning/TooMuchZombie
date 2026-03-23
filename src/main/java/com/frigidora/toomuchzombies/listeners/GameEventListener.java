@@ -642,12 +642,13 @@ public class GameEventListener implements Listener {
                     agent.clearInvestigationTarget();
                     agent.setTargetEntity(sourcePlayer);
                     agent.setTargetLocation(sourcePlayer.getLocation());
+                    agent.lockPursuitOn(sourcePlayer, 3500L);
                     agent.getZombie().setTarget(sourcePlayer);
                     continue;
                 }
             }
 
-            if (!hasValidTarget) {
+            if (!hasValidTarget && !agent.isPursuitLocked()) {
                 agent.setInvestigationTarget(location, 3500L);
             }
         }

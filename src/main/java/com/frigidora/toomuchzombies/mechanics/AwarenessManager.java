@@ -48,12 +48,13 @@ public class AwarenessManager {
                     agent.clearInvestigationTarget();
                     agent.setTargetEntity(sourcePlayer);
                     agent.setTargetLocation(sourcePlayer.getLocation());
+                    agent.lockPursuitOn(sourcePlayer, 3500L);
                     zombie.setTarget(sourcePlayer);
                     continue;
                 }
             }
 
-            if (agent.getTargetEntity() == null || !agent.getTargetEntity().isValid()) {
+            if ((agent.getTargetEntity() == null || !agent.getTargetEntity().isValid()) && !agent.isPursuitLocked()) {
                 agent.setInvestigationTarget(location, NOISE_INVESTIGATION_TTL_MS);
             }
         }

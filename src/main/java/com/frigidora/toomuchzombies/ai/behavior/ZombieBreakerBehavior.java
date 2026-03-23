@@ -74,6 +74,17 @@ public class ZombieBreakerBehavior {
         return currentTarget != null;
     }
 
+    public Block getCurrentTarget() {
+        return currentTarget;
+    }
+
+    public long getCurrentBreakDurationMs() {
+        if (currentTarget == null || startBreakTime <= 0) {
+            return 0L;
+        }
+        return System.currentTimeMillis() - startBreakTime;
+    }
+
     public boolean canBreak(Block block) {
         if (block == null || block.getType() == Material.AIR || !block.getType().isBlock() || !block.getType().isSolid()) {
             return false;
@@ -105,6 +116,10 @@ public class ZombieBreakerBehavior {
 
         zombie.swingMainHand();
         breakProgress += getBreakSpeed(currentTarget) * (float) ConfigManager.getInstance().getBreakSpeed();
+
+        if (shouldRequestBreachSupport(currentTarget)) {
+            ZombieAIManager.getInstance().requestBreach(currentTarget.getLocation().add(0.5, 0.5, 0.5));
+        }
 
         int stage = Math.min(9, Math.max(0, (int) Math.floor(breakProgress * 10.0f)));
         sendBreakPacket(currentTarget, stage);
@@ -281,6 +296,31 @@ public class ZombieBreakerBehavior {
             return false;
         }
         return true;
+    }
+
+    private boolean shouldRequestBreachSupport(Block block) {
+        if (block == null || block.getType() == Material.AIR) {
+            return false;
+        }
+        if (agent.getRole() == com.frigidora.toomuchzombies.enums.ZombieRole.SUICIDE) {
+            return false;
+        }
+        long threshold = ConfigManager.getInstance().getBuilderBreachRequestAfterMs();
+        if (getCurrentBreakDurationMs() < threshold) {
+            return false;
+        }
+        String name = block.getType().name();
+        boolean blastResistant = name.contains("OBSIDIAN")
+            || name.contains("ANVIL")
+            || name.contains("END_STONE")
+            || name.contains("DEEPSLATE")
+            || name.contains("BRICK")
+            || name.contains("CONCRETE")
+            || block.getType().getHardness() >= 3.0f;
+        if (!blastResistant) {
+            return false;
+        }
+        return agent.checkAndResetSkillCooldown("BREACH_REQ_" + zombie.getUniqueId(), 1200L);
     }
 
     public java.util.Map<String, Integer> getRejectCountersSnapshot() {

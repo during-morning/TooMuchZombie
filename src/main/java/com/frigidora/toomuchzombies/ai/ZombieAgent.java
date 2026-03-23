@@ -22,6 +22,8 @@ public class ZombieAgent {
     private boolean isFlanking;
     private Location investigationTarget;
     private long investigationExpiry;
+    private long pursuitLockUntil;
+    private UUID pursuitTargetUuid;
     
     // 冷却时间映射
     private final Map<String, Long> cooldowns = new HashMap<>();
@@ -158,6 +160,9 @@ public class ZombieAgent {
     
     public void setTargetEntity(LivingEntity target) {
         this.targetEntityRef = new WeakReference<>(target);
+        if (target != null) {
+            this.pursuitTargetUuid = target.getUniqueId();
+        }
     }
     
     public LivingEntity getTargetEntity() {
@@ -192,6 +197,25 @@ public class ZombieAgent {
     public void clearInvestigationTarget() {
         investigationTarget = null;
         investigationExpiry = 0L;
+    }
+
+    public void lockPursuitOn(LivingEntity target, long ttlMs) {
+        if (target == null || !target.isValid()) {
+            return;
+        }
+        this.pursuitTargetUuid = target.getUniqueId();
+        this.pursuitLockUntil = Math.max(this.pursuitLockUntil, System.currentTimeMillis() + Math.max(250L, ttlMs));
+    }
+
+    public boolean isPursuitLocked() {
+        return System.currentTimeMillis() <= pursuitLockUntil;
+    }
+
+    public boolean isPursuitLockedOn(UUID targetUuid) {
+        if (!isPursuitLocked() || targetUuid == null || pursuitTargetUuid == null) {
+            return false;
+        }
+        return pursuitTargetUuid.equals(targetUuid);
     }
 
     public boolean checkAndResetSkillCooldown(String skillKey, long cooldownMs) {

@@ -517,6 +517,9 @@ public class ZombieAIManager implements Listener {
         }
 
         LivingEntity current = agent.getTargetEntity();
+        if (current != null && current.isValid() && !current.isDead() && current.getWorld().equals(zombie.getWorld())) {
+            agent.lockPursuitOn(current, 1200L);
+        }
         LivingEntity best = null;
         UUID plannedId = plannedTargets.get(agent.getUuid());
         if (plannedId != null) {
@@ -558,6 +561,12 @@ public class ZombieAIManager implements Listener {
             }
         }
 
+        if (current != null && current.isValid() && !current.isDead() && current.getWorld().equals(zombie.getWorld())) {
+            if (agent.isPursuitLockedOn(current.getUniqueId()) && !best.getUniqueId().equals(current.getUniqueId())) {
+                return;
+            }
+        }
+
         if (current != null && current.isValid() && !current.isDead() && current.getWorld().equals(zombie.getWorld()) && !best.equals(current)) {
             double currentDistSq = zombie.getLocation().distanceSquared(current.getLocation());
             double bestDistSq = zombie.getLocation().distanceSquared(best.getLocation());
@@ -569,6 +578,7 @@ public class ZombieAIManager implements Listener {
         zombie.setTarget(best);
         agent.clearInvestigationTarget();
         agent.setTargetEntity(best);
+        agent.lockPursuitOn(best, 2800L);
         agent.setLastKnownTargetLocation(best.getLocation());
     }
 

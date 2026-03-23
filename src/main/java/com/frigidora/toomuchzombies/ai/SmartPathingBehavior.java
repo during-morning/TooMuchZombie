@@ -41,6 +41,7 @@ public class SmartPathingBehavior {
         LivingEntity currentTarget = agent.getTargetEntity() != null ? agent.getTargetEntity() : z.getTarget();
         if (currentTarget != null && currentTarget.isValid() && currentTarget.getWorld().equals(z.getWorld())) {
             agent.setLastKnownTargetLocation(currentTarget.getLocation());
+            agent.clearInvestigationTarget();
             targetLoc = currentTarget.getLocation();
         }
 
@@ -195,7 +196,7 @@ public class SmartPathingBehavior {
         
         // 增加建造意愿：专家僵尸更容易开启建筑模式，普通僵尸如果卡住较久也会尝试
         if (terrainModificationEnabled && isSpecialist) {
-            if (agent.isStuck() || Math.random() < 0.05) { // 专家有 5% 概率主动开启建筑模式
+            if (shouldStartStructuralMode(agent, targetLoc)) {
                 builder.setActive(true);
                 builder.tick();
                 return;
@@ -284,6 +285,10 @@ public class SmartPathingBehavior {
                 if (isBreakCandidate(agent, b.getType()) && breaker.canBreak(b)) {
                     breaker.startBreaking(b);
                     return;
+                }
+                if (isBreachWorthy(b.getType())
+                    && agent.checkAndResetSkillCooldown("BREACH_REQ_NEAR", 1200L)) {
+                    ZombieAIManager.getInstance().requestBreach(b.getLocation().add(0.5, 0.5, 0.5));
                 }
             }
         }
@@ -414,5 +419,64 @@ public class SmartPathingBehavior {
     private boolean isWooden(Material material) {
         String name = material.name();
         return name.contains("WOOD") || name.contains("LOG") || name.contains("PLANKS") || name.contains("FENCE") || name.contains("CHEST") || name.contains("BARREL");
+    }
+
+    private boolean isBreachWorthy(Material material) {
+        if (material == null || material == Material.AIR || !material.isBlock()) {
+            return false;
+        }
+        String name = material.name();
+        return material.getHardness() >= 3.0f
+            || name.contains("OBSIDIAN")
+            || name.contains("DEEPSLATE")
+            || name.contains("BRICK")
+            || name.contains("CONCRETE")
+            || name.contains("ANVIL");
+    }
+
+    private boolean shouldStartStructuralMode(ZombieAgent agent, Location targetLoc) {
+        Zombie z = agent.getZombie();
+        if (targetLoc == null || !z.getWorld().equals(targetLoc.getWorld())) {
+            return agent.isStuck();
+        }
+
+        if (agent.isStuck()) {
+            return true;
+        }
+
+        double distSq = z.getLocation().distanceSquared(targetLoc);
+        if (distSq <= 4.0) {
+            return false;
+        }
+
+        double yDiff = targetLoc.getY() - z.getLocation().getY();
+        if (yDiff >= 1.8 && distSq <= 16.0 * 16.0) {
+            return true;
+        }
+
+        Vector dir = targetLoc.toVector().subtract(z.getLocation().toVector()).setY(0);
+        if (dir.lengthSquared() < 0.04) {
+            return false;
+        }
+        dir.normalize();
+
+        Block first = z.getLocation().add(dir.clone().multiply(1.0)).getBlock();
+        Block firstHead = first.getRelative(BlockFace.UP);
+        Block second = z.getLocation().add(dir.clone().multiply(2.0)).getBlock();
+        Block secondHead = second.getRelative(BlockFace.UP);
+
+        boolean blockedAhead = first.getType().isSolid() || firstHead.getType().isSolid()
+            || second.getType().isSolid() || secondHead.getType().isSolid();
+        if (blockedAhead) {
+            return true;
+        }
+
+        Block frontGround = first.getRelative(BlockFace.DOWN);
+        boolean gapAhead = !frontGround.getType().isSolid();
+        if (gapAhead && distSq >= 9.0) {
+            return true;
+        }
+
+        return z.getPathfinder() != null && !z.getPathfinder().hasPath() && distSq >= 25.0;
     }
 }

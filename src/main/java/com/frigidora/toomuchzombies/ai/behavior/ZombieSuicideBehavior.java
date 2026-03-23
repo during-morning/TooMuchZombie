@@ -1,7 +1,10 @@
 package com.frigidora.toomuchzombies.ai.behavior;
 
 import org.bukkit.Location;
+import org.bukkit.block.Block;
+import org.bukkit.block.BlockFace;
 import org.bukkit.entity.Zombie;
+import org.bukkit.util.Vector;
 
 import com.frigidora.toomuchzombies.TooMuchZombies;
 import com.frigidora.toomuchzombies.ai.ZombieAIManager;
@@ -16,6 +19,7 @@ public class ZombieSuicideBehavior {
     private Location breachTarget;
     private long lastCheckTime;
     private boolean isCharging;
+    private long chargeStartTime;
 
     public ZombieSuicideBehavior(ZombieAgent agent) {
         this.agent = agent;
@@ -55,6 +59,12 @@ public class ZombieSuicideBehavior {
                 detonate();
                 return;
             }
+
+            if (System.currentTimeMillis() - chargeStartTime > 5000L) {
+                isCharging = false;
+                breachTarget = null;
+                return;
+            }
             
             // 持续向目标冲锋
             if (TooMuchZombies.getNMSHandler() != null) {
@@ -81,21 +91,51 @@ public class ZombieSuicideBehavior {
         }
 
         // 定期检查是否有爆破请求 (每 0.5 秒)
-        if (System.currentTimeMillis() - lastCheckTime > 500) {
+        if (System.currentTimeMillis() - lastCheckTime > 350) {
             lastCheckTime = System.currentTimeMillis();
             
-            // 搜索 30 格内的请求
-            Location request = ZombieAIManager.getInstance().getNearestBreachRequest(zombie.getLocation(), 30.0);
+            // 优先消费较远的爆破请求，避免 TNT 单位“看得见但接不到”。
+            Location request = ZombieAIManager.getInstance().getNearestBreachRequest(zombie.getLocation(), 56.0);
+            if (request == null) {
+                request = findLocalBreachPoint();
+            }
             if (request != null) {
                 // 接受任务
                 this.breachTarget = request;
                 this.isCharging = true;
+                this.chargeStartTime = System.currentTimeMillis();
                 ZombieAIManager.getInstance().fulfillBreachRequest(request); // 标记为已接单
                 
                 // 发出声音
                 zombie.getWorld().playSound(zombie.getLocation(), org.bukkit.Sound.ENTITY_TNT_PRIMED, 1.0f, 1.0f);
             }
         }
+    }
+
+    private Location findLocalBreachPoint() {
+        org.bukkit.entity.LivingEntity target = agent.getTargetEntity() != null ? agent.getTargetEntity() : zombie.getTarget();
+        if (target == null || !target.isValid() || !target.getWorld().equals(zombie.getWorld())) {
+            return null;
+        }
+
+        Vector toward = target.getLocation().toVector().subtract(zombie.getLocation().toVector()).setY(0);
+        if (toward.lengthSquared() < 0.05) {
+            toward = zombie.getLocation().getDirection().setY(0);
+        }
+        if (toward.lengthSquared() < 0.05) {
+            return null;
+        }
+        toward.normalize();
+
+        Block feet = zombie.getLocation().add(toward.clone().multiply(1.0)).getBlock();
+        Block head = feet.getRelative(BlockFace.UP);
+        if (feet.getType().isSolid()) {
+            return feet.getLocation().add(0.5, 0.5, 0.5);
+        }
+        if (head.getType().isSolid()) {
+            return head.getLocation().add(0.5, 0.5, 0.5);
+        }
+        return null;
     }
 
     private void detonate() {
