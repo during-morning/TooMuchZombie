@@ -2,6 +2,7 @@ package com.frigidora.toomuchzombies.ai;
 
 import org.bukkit.Location;
 import org.bukkit.Material;
+import org.bukkit.block.Block;
 import org.bukkit.entity.Arrow;
 import org.bukkit.entity.EnderPearl;
 import org.bukkit.entity.LivingEntity;
@@ -49,6 +50,9 @@ public class CombatBehavior {
                  // 强制手持 TNT (仅视觉，或者作为技能标识)
                  if (agent.getZombie().getEquipment().getItemInMainHand().getType() != Material.TNT) {
                      agent.getZombie().getEquipment().setItemInMainHand(new ItemStack(Material.TNT));
+                 }
+                 if (tryHandleBreachTnt(agent)) {
+                     break;
                  }
                  // TNT 僵尸：冷却 20秒 (20000ms)，自伤，高级 TNT
                  long tntCooldown = Math.max(9000L, 20000L - agent.getLevel() * 600L);
@@ -230,6 +234,42 @@ public class CombatBehavior {
         
         // 添加元数据以识别僵尸的 TNT
         tnt.setMetadata("ZombieTNT", new org.bukkit.metadata.FixedMetadataValue(com.frigidora.toomuchzombies.TooMuchZombies.getInstance(), true));
+    }
+
+    private boolean tryHandleBreachTnt(ZombieAgent agent) {
+        Zombie zombie = agent.getZombie();
+        Location breach = ZombieAIManager.getInstance().getNearestBreachRequest(zombie.getLocation(), 18.0);
+        if (breach == null || breach.getWorld() == null || !breach.getWorld().equals(zombie.getWorld())) {
+            return false;
+        }
+
+        if (zombie.getLocation().distanceSquared(breach) > 6.0 * 6.0) {
+            agent.moveTo(breach, 1.25);
+            return true;
+        }
+
+        if (!agent.checkAndResetSkillCooldown("BREACH_TNT", Math.max(3200L, 6500L - agent.getLevel() * 180L))) {
+            return true;
+        }
+
+        Block center = breach.getBlock();
+        for (int y = 0; y <= 1; y++) {
+            Block candidate = center.getRelative(0, y, 0);
+            if (candidate.getType().isSolid()) {
+                center = candidate;
+                break;
+            }
+        }
+
+        Location spawn = center.getLocation().add(0.5, 0.5, 0.5);
+        TNTPrimed tnt = zombie.getWorld().spawn(spawn, TNTPrimed.class);
+        tnt.setFuseTicks(26);
+        tnt.setYield(3.2f);
+        tnt.setMetadata("ZombieTNT", new org.bukkit.metadata.FixedMetadataValue(com.frigidora.toomuchzombies.TooMuchZombies.getInstance(), true));
+        zombie.getWorld().playSound(zombie.getLocation(), org.bukkit.Sound.ENTITY_TNT_PRIMED, 1.0f, 0.9f);
+        zombie.damage(4.0);
+        ZombieAIManager.getInstance().fulfillBreachRequest(breach);
+        return true;
     }
     
     private void throwPotion(ZombieAgent agent, Location target) {

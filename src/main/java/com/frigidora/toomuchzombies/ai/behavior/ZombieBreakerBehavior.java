@@ -39,6 +39,9 @@ public class ZombieBreakerBehavior {
         refreshBreakRulesIfNeeded();
         if (!isBreakAllowed(block)) {
             hitReject("policy_blocked");
+            if (shouldRequestBreachSupport(block)) {
+                ZombieAIManager.getInstance().requestBreach(block.getLocation().add(0.5, 0.5, 0.5));
+            }
             return;
         }
         
@@ -93,6 +96,9 @@ public class ZombieBreakerBehavior {
         refreshBreakRulesIfNeeded();
         if (!isBreakAllowed(block)) {
             hitReject("policy_blocked");
+            if (shouldRequestBreachSupport(block)) {
+                ZombieAIManager.getInstance().requestBreach(block.getLocation().add(0.5, 0.5, 0.5));
+            }
             return false;
         }
 

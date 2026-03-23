@@ -621,36 +621,5 @@ public class GameEventListener implements Listener {
         chunkNoiseCooldowns.put(chunkKey, now);
 
         awarenessManager.alertNoise(location, range, sourcePlayer);
-
-        java.util.Collection<com.frigidora.toomuchzombies.ai.ZombieAgent> agents = ZombieAIManager.getInstance().getNearbyAgents(location, range);
-        for (com.frigidora.toomuchzombies.ai.ZombieAgent agent : agents) {
-            org.bukkit.entity.LivingEntity currentTarget = agent.getTargetEntity() != null ? agent.getTargetEntity() : agent.getZombie().getTarget();
-            boolean hasValidTarget = currentTarget != null && currentTarget.isValid() && !currentTarget.isDead();
-
-            if (sourcePlayer != null && sourcePlayer.isValid() && !sourcePlayer.isDead()) {
-                double distSq = agent.getZombie().getLocation().distanceSquared(sourcePlayer.getLocation());
-                boolean strongSignal = distSq <= Math.max(64.0, range * range * 0.36) || agent.getZombie().hasLineOfSight(sourcePlayer);
-                boolean sameTarget = currentTarget != null && sourcePlayer.getUniqueId().equals(currentTarget.getUniqueId());
-                boolean shouldRetarget = !hasValidTarget || sameTarget;
-
-                if (hasValidTarget && currentTarget != null && currentTarget.getWorld().equals(sourcePlayer.getWorld())) {
-                    double currentDistSq = agent.getZombie().getLocation().distanceSquared(currentTarget.getLocation());
-                    shouldRetarget = shouldRetarget || distSq + 9.0 < currentDistSq;
-                }
-
-                if (strongSignal && shouldRetarget) {
-                    agent.clearInvestigationTarget();
-                    agent.setTargetEntity(sourcePlayer);
-                    agent.setTargetLocation(sourcePlayer.getLocation());
-                    agent.lockPursuitOn(sourcePlayer, 3500L);
-                    agent.getZombie().setTarget(sourcePlayer);
-                    continue;
-                }
-            }
-
-            if (!hasValidTarget && !agent.isPursuitLocked()) {
-                agent.setInvestigationTarget(location, 3500L);
-            }
-        }
     }
 }

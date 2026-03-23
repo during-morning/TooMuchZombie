@@ -2,6 +2,7 @@ package com.frigidora.toomuchzombies.mechanics;
 
 import org.bukkit.Location;
 import org.bukkit.entity.Entity;
+import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Player;
 import org.bukkit.entity.Zombie;
 
@@ -41,10 +42,30 @@ public class AwarenessManager {
             if (agent == null) {
                 continue;
             }
+            if (!agent.checkAndResetSkillCooldown("NOISE_REACT", 300L)) {
+                continue;
+            }
+
+            LivingEntity currentTarget = agent.getTargetEntity();
+            boolean hasValidTarget = currentTarget != null
+                && currentTarget.isValid()
+                && !currentTarget.isDead()
+                && currentTarget.getWorld().equals(zombie.getWorld());
 
             if (sourcePlayer != null && sourcePlayer.isValid() && !sourcePlayer.isDead()) {
                 double distSq = zombie.getLocation().distanceSquared(sourcePlayer.getLocation());
-                if (distSq <= Math.max(100.0, radius * radius * 0.64) || zombie.hasLineOfSight(sourcePlayer)) {
+                boolean strongSignal = distSq <= Math.max(100.0, radius * radius * 0.64) || zombie.hasLineOfSight(sourcePlayer);
+                boolean sameTarget = hasValidTarget && sourcePlayer.getUniqueId().equals(currentTarget.getUniqueId());
+                boolean lockedOnOther = hasValidTarget
+                    && !sameTarget
+                    && agent.isPursuitLockedOn(currentTarget.getUniqueId());
+                boolean shouldSwitch = !hasValidTarget || sameTarget;
+                if (hasValidTarget && !sameTarget) {
+                    double currentDistSq = zombie.getLocation().distanceSquared(currentTarget.getLocation());
+                    shouldSwitch = shouldSwitch || distSq + 9.0 < currentDistSq;
+                }
+
+                if (strongSignal && shouldSwitch && !lockedOnOther) {
                     agent.clearInvestigationTarget();
                     agent.setTargetEntity(sourcePlayer);
                     agent.setTargetLocation(sourcePlayer.getLocation());
@@ -54,7 +75,7 @@ public class AwarenessManager {
                 }
             }
 
-            if ((agent.getTargetEntity() == null || !agent.getTargetEntity().isValid()) && !agent.isPursuitLocked()) {
+            if (!hasValidTarget && !agent.isPursuitLocked()) {
                 agent.setInvestigationTarget(location, NOISE_INVESTIGATION_TTL_MS);
             }
         }
