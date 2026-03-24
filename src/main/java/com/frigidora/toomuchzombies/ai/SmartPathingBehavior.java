@@ -128,7 +128,6 @@ public class SmartPathingBehavior {
              
              if (nearestLight != null) {
                  applyLightDebuffs(z);
-                 z.addPotionEffect(new org.bukkit.potion.PotionEffect(org.bukkit.potion.PotionEffectType.GLOWING, 60, 0));
 
                  Vector fleeDir = z.getLocation().toVector().subtract(nearestLight.toVector()).normalize();
                  Location fleeTarget = z.getLocation().add(fleeDir.multiply(12));
@@ -438,6 +437,11 @@ public class SmartPathingBehavior {
         Zombie z = agent.getZombie();
         if (targetLoc == null || !z.getWorld().equals(targetLoc.getWorld())) {
             return agent.isStuck();
+        }
+
+        // 对齐 ZombieGame：受击后短时间内优先追击/战斗，而非立即开始搭建。
+        if (agent.wasDamagedRecently(1500) && agent.getTicksStuck() < ConfigManager.getInstance().getRecoveryStuckTeleportTicks()) {
+            return false;
         }
 
         if (agent.isStuck()) {

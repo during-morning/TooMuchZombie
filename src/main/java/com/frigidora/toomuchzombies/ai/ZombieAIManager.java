@@ -532,6 +532,13 @@ public class ZombieAIManager implements Listener {
         }
 
         LivingEntity current = agent.getTargetEntity();
+        if ((current == null || !current.isValid() || current.isDead()) && zombie.getTarget() instanceof LivingEntity vanillaTarget) {
+            if (vanillaTarget.isValid() && !vanillaTarget.isDead() && vanillaTarget.getWorld().equals(zombie.getWorld())) {
+                current = vanillaTarget;
+                agent.setTargetEntity(vanillaTarget);
+                agent.setLastKnownTargetLocation(vanillaTarget.getLocation());
+            }
+        }
         if (current != null && current.isValid() && !current.isDead() && current.getWorld().equals(zombie.getWorld())) {
             agent.lockPursuitOn(current, 1200L);
         }
