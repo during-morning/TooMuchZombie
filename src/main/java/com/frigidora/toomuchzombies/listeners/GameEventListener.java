@@ -5,6 +5,7 @@ import java.util.Random;
 import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.NamespacedKey;
+import org.bukkit.World;
 import org.bukkit.entity.AbstractSkeleton;
 import org.bukkit.entity.Creeper;
 import org.bukkit.entity.Enderman;
@@ -33,6 +34,7 @@ import org.bukkit.enchantments.Enchantment;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.EnchantmentStorageMeta;
 import org.bukkit.inventory.meta.ItemMeta;
+import org.bukkit.metadata.FixedMetadataValue;
 import org.bukkit.persistence.PersistentDataType;
 import org.bukkit.potion.PotionEffect;
 import org.bukkit.potion.PotionEffectType;
@@ -49,6 +51,9 @@ import com.frigidora.toomuchzombies.mechanics.PlayerLevelManager;
 import com.frigidora.toomuchzombies.mechanics.ZombieFactory;
 
 public class GameEventListener implements Listener {
+    private static final String PENDING_CREEPER_CONVERT = "tmz_pending_creeper_convert";
+    private static final int END_WORLD_ZOMBIE_CAP = 120;
+    private static final int END_NEARBY_ZOMBIE_CAP = 40;
 
     private final HiveMindManager hiveMindManager = new HiveMindManager();
     private final AwarenessManager awarenessManager = AwarenessManager.getInstance();
@@ -67,6 +72,15 @@ public class GameEventListener implements Listener {
 
         LivingEntity entity = event.getEntity();
         Location loc = entity.getLocation();
+        boolean convertible = isConvertibleHostile(entity);
+
+        if (loc.getWorld().getEnvironment() == World.Environment.THE_END) {
+            if (ZombieAIManager.getInstance().getZombieCountInWorld(loc.getWorld()) >= END_WORLD_ZOMBIE_CAP
+                || countManagedZombiesNear(loc, 80.0) >= END_NEARBY_ZOMBIE_CAP) {
+                event.setCancelled(true);
+                return;
+            }
+        }
 
         if (!ZombieFactory.evaluateSpawnPipeline(loc, entity.getType())) {
             event.setCancelled(true);
@@ -122,55 +136,78 @@ public class GameEventListener implements Listener {
             }
         }
 
-        // 海洋生物转化
-        if (entity instanceof org.bukkit.entity.Drowned) {
-            ZombieFactory.assignRole((Zombie) entity);
-            calculateAndApplyStats(event, (Zombie) entity, loc);
+        if (entity instanceof Creeper creeper) {
+            startDelayedCreeperConversion(creeper);
             return;
         }
 
-        // 地狱生物转化 (僵尸猪灵)
-        if (entity.getType() == EntityType.ZOMBIFIED_PIGLIN) {
-            Zombie z = (Zombie) entity;
-            // 注入 AI，但保持中立
-            ZombieFactory.assignRole(z);
-            // 修正猪人建筑工只能用特定方块
-            if (ZombieAIManager.getInstance().getAgent(z.getUniqueId()) != null &&
-                ZombieAIManager.getInstance().getAgent(z.getUniqueId()).getRole() == ZombieRole.BUILDER) {
-
-                Material[] netherBlocks = {Material.NETHERRACK, Material.COBBLESTONE, Material.BONE_BLOCK};
-                z.getEquipment().setItemInMainHand(new ItemStack(netherBlocks[random.nextInt(netherBlocks.length)]));
-            }
-            calculateAndApplyStats(event, z, loc);
+        if (convertible) {
+            event.setCancelled(true);
+            spawnConvertedZombie(loc);
             return;
         }
 
         if (entity instanceof Zombie) {
             ZombieFactory.assignRole((Zombie) entity);
             calculateAndApplyStats(event, (Zombie) entity, loc);
-        } else if (entity instanceof Enderman) {
-            event.setCancelled(true);
-            spawnZombie(loc, ZombieRole.ENDER);
-        } else if (entity instanceof AbstractSkeleton) {
-            event.setCancelled(true);
-            // 骷髅转化为随机僵尸 (原先是 ARCHER，现在改为随机)
-            Zombie z = (Zombie) loc.getWorld().spawnEntity(loc, EntityType.ZOMBIE);
-            ZombieFactory.assignRole(z);
-        } else if (entity instanceof Creeper) {
-            event.setCancelled(true);
-             // 苦力怕转化为随机僵尸 (原先是 RUSHER/SUICIDE，现在改为随机)
-            Zombie z = (Zombie) loc.getWorld().spawnEntity(loc, EntityType.ZOMBIE);
-            ZombieFactory.assignRole(z);
-        } else if (entity instanceof Spider) {
-            event.setCancelled(true);
-            Zombie z = (Zombie) loc.getWorld().spawnEntity(loc, EntityType.ZOMBIE);
-            ZombieFactory.assignRole(z); // 随机角色
-        } else if (entity instanceof Witch) {
-            event.setCancelled(true);
-            // 女巫转化为随机僵尸 (原先是 NURSE，现在改为随机)
-            Zombie z = (Zombie) loc.getWorld().spawnEntity(loc, EntityType.ZOMBIE);
-            ZombieFactory.assignRole(z);
         }
+    }
+
+    private void spawnConvertedZombie(Location loc) {
+        Zombie z = (Zombie) loc.getWorld().spawnEntity(loc, EntityType.ZOMBIE);
+        ZombieFactory.assignRole(z);
+        calculateAndApplyStats(null, z, loc);
+    }
+
+    private boolean isConvertibleHostile(LivingEntity entity) {
+        if (entity == null) {
+            return false;
+        }
+        if (entity instanceof Zombie) {
+            return false;
+        }
+        return entity instanceof AbstractSkeleton
+            || entity instanceof Creeper
+            || entity instanceof Spider
+            || entity instanceof Enderman
+            || entity instanceof Witch
+            || entity.getType() == EntityType.ZOMBIFIED_PIGLIN
+            || entity.getType() == EntityType.DROWNED;
+    }
+
+    private int countManagedZombiesNear(Location center, double radius) {
+        int count = 0;
+        for (com.frigidora.toomuchzombies.ai.ZombieAgent agent : ZombieAIManager.getInstance().getNearbyAgents(center, radius)) {
+            Zombie z = agent.getZombie();
+            if (z != null && z.isValid() && z.getWorld().equals(center.getWorld())) {
+                count++;
+            }
+        }
+        return count;
+    }
+
+    private void startDelayedCreeperConversion(Creeper creeper) {
+        if (creeper == null || !creeper.isValid() || creeper.hasMetadata(PENDING_CREEPER_CONVERT)) {
+            return;
+        }
+        creeper.setMetadata(PENDING_CREEPER_CONVERT, new FixedMetadataValue(com.frigidora.toomuchzombies.TooMuchZombies.getInstance(), true));
+        creeper.addPotionEffect(new PotionEffect(PotionEffectType.INVISIBILITY, 40, 0, false, false, false));
+
+        org.bukkit.Bukkit.getScheduler().runTaskLater(
+            com.frigidora.toomuchzombies.TooMuchZombies.getInstance(),
+            () -> {
+                if (!creeper.isValid() || creeper.isDead()) {
+                    return;
+                }
+                Location cLoc = creeper.getLocation();
+                if (cLoc.getWorld() == null) {
+                    return;
+                }
+                creeper.remove();
+                spawnConvertedZombie(cLoc);
+            },
+            40L
+        );
     }
 
     private void spawnZombie(Location loc, ZombieRole role) {

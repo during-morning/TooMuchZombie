@@ -114,7 +114,8 @@ public class ZombieFactory {
             return true;
         }
 
-        if (cfg.isSpawnEnforceNightOnly()) {
+        boolean isDirectZombieSpawn = entityType == EntityType.ZOMBIE || entityType == EntityType.DROWNED;
+        if (cfg.isSpawnEnforceNightOnly() && isDirectZombieSpawn) {
             long time = loc.getWorld().getTime();
             if (time >= 0 && time < 12000) {
                 reject("daytime");

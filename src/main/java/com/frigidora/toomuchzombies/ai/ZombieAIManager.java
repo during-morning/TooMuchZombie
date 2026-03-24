@@ -9,6 +9,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.bukkit.Location;
 import org.bukkit.GameMode;
+import org.bukkit.World;
 import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Player;
 import org.bukkit.entity.Zombie;
@@ -147,6 +148,20 @@ public class ZombieAIManager implements Listener {
 
     public int getZombieCount() {
         return agents.size();
+    }
+
+    public int getZombieCountInWorld(World world) {
+        if (world == null) {
+            return 0;
+        }
+        int count = 0;
+        for (ZombieAgent agent : agents.values()) {
+            Zombie z = agent.getZombie();
+            if (z != null && z.isValid() && world.equals(z.getWorld())) {
+                count++;
+            }
+        }
+        return count;
     }
     
     public boolean isBuildSpotReserved(org.bukkit.Location loc) {
