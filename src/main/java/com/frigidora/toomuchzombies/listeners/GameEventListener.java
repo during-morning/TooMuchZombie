@@ -6,6 +6,7 @@ import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.NamespacedKey;
 import org.bukkit.World;
+import org.bukkit.attribute.Attribute;
 import org.bukkit.entity.AbstractSkeleton;
 import org.bukkit.entity.Creeper;
 import org.bukkit.entity.Enderman;
@@ -23,6 +24,7 @@ import org.bukkit.event.block.BlockPlaceEvent;
 import org.bukkit.event.entity.FoodLevelChangeEvent;
 import org.bukkit.event.entity.CreatureSpawnEvent;
 import org.bukkit.event.entity.EntityCombustEvent;
+import org.bukkit.event.entity.CreeperPowerEvent;
 import org.bukkit.event.entity.EntityDamageByEntityEvent;
 import org.bukkit.event.entity.EntityDamageEvent;
 import org.bukkit.event.entity.EntityDamageEvent.DamageCause;
@@ -52,13 +54,18 @@ import com.frigidora.toomuchzombies.mechanics.PlayerLevelManager;
 import com.frigidora.toomuchzombies.mechanics.ZombieFactory;
 
 public class GameEventListener implements Listener {
-    private static final String PENDING_CREEPER_CONVERT = "tmz_pending_creeper_convert";
+    private static final String STEALTH_CREEPER_MARK = "tmz_stealth_creeper";
+    private static final String STEALTH_CREEPER_PDC_KEY = "tmz_stealth_creeper";
     private static final int END_WORLD_ZOMBIE_CAP = 120;
     private static final int END_NEARBY_ZOMBIE_CAP = 40;
 
     private final HiveMindManager hiveMindManager = new HiveMindManager();
     private final AwarenessManager awarenessManager = AwarenessManager.getInstance();
     private final Random random = new Random();
+
+    public GameEventListener() {
+        startGlobalStealthCreeperEnforcer();
+    }
 
     @EventHandler
     public void onEntityTarget(EntityTargetLivingEntityEvent event) {
@@ -144,7 +151,7 @@ public class GameEventListener implements Listener {
         }
 
         if (entity instanceof Creeper creeper) {
-            startDelayedCreeperConversion(creeper);
+            configureStealthCreeper(creeper);
             return;
         }
 
@@ -158,6 +165,15 @@ public class GameEventListener implements Listener {
             ZombieFactory.assignRole((Zombie) entity);
             calculateAndApplyStats(event, (Zombie) entity, loc);
         }
+    }
+
+    @EventHandler
+    public void onCreeperPower(CreeperPowerEvent event) {
+        if (!(event.getEntity() instanceof Creeper creeper)) {
+            return;
+        }
+        // 闪电苦力怕同样不转换，统一走隐身+禁自主移动逻辑。
+        configureStealthCreeper(creeper);
     }
 
     private void spawnConvertedZombie(Location loc) {
@@ -196,39 +212,60 @@ public class GameEventListener implements Listener {
         return count;
     }
 
-    private void startDelayedCreeperConversion(Creeper creeper) {
-        if (creeper == null || !creeper.isValid() || creeper.hasMetadata(PENDING_CREEPER_CONVERT)) {
+    private void configureStealthCreeper(Creeper creeper) {
+        if (creeper == null || !creeper.isValid()) {
             return;
         }
-        creeper.setMetadata(PENDING_CREEPER_CONVERT, new FixedMetadataValue(com.frigidora.toomuchzombies.TooMuchZombies.getInstance(), true));
-        creeper.setInvisible(true);
-        creeper.addPotionEffect(new PotionEffect(PotionEffectType.INVISIBILITY, 40, 0, false, false, false), true);
+        if (!creeper.hasMetadata(STEALTH_CREEPER_MARK)) {
+            creeper.setMetadata(STEALTH_CREEPER_MARK, new FixedMetadataValue(com.frigidora.toomuchzombies.TooMuchZombies.getInstance(), true));
+        }
+        markStealthCreeper(creeper);
 
+        // 保留苦力怕自爆逻辑，仅移除其自主移动能力。
+        applyStealthCreeperState(creeper);
+
+        // 双保险：下一 tick 再应用一次，覆盖可能的后置初始化/属性回写。
         org.bukkit.Bukkit.getScheduler().runTaskLater(
             com.frigidora.toomuchzombies.TooMuchZombies.getInstance(),
-            () -> {
-                if (!creeper.isValid() || creeper.isDead()) {
-                    return;
-                }
-                Location cLoc = creeper.getLocation();
-                if (cLoc.getWorld() == null) {
-                    return;
-                }
-                creeper.removeMetadata(PENDING_CREEPER_CONVERT, com.frigidora.toomuchzombies.TooMuchZombies.getInstance());
-                creeper.remove();
-                // 苦力怕专属转换：固定转为自爆僵尸。
-                spawnZombie(cLoc, ZombieRole.SUICIDE);
-            },
-            40L
+            () -> applyStealthCreeperState(creeper),
+            1L
         );
     }
 
-    private void spawnZombie(Location loc, ZombieRole role) {
-        if (!ZombieFactory.canSpawnManagedZombie(loc)) {
+    private void applyStealthCreeperState(Creeper creeper) {
+        if (creeper == null || !creeper.isValid() || !isStealthCreeper(creeper)) {
             return;
         }
-        Zombie zombie = (Zombie) loc.getWorld().spawnEntity(loc, EntityType.ZOMBIE);
-        ZombieFactory.assignRole(zombie, role);
+        creeper.setInvisible(true);
+        creeper.addPotionEffect(new PotionEffect(PotionEffectType.INVISIBILITY, Integer.MAX_VALUE, 0, true, false, false), true);
+        if (creeper.getAttribute(Attribute.GENERIC_MOVEMENT_SPEED) != null) {
+            creeper.getAttribute(Attribute.GENERIC_MOVEMENT_SPEED).setBaseValue(0.0);
+        }
+    }
+
+    private void markStealthCreeper(Creeper creeper) {
+        NamespacedKey key = new NamespacedKey(com.frigidora.toomuchzombies.TooMuchZombies.getInstance(), STEALTH_CREEPER_PDC_KEY);
+        creeper.getPersistentDataContainer().set(key, PersistentDataType.BYTE, (byte) 1);
+    }
+
+    private boolean isStealthCreeper(Creeper creeper) {
+        NamespacedKey key = new NamespacedKey(com.frigidora.toomuchzombies.TooMuchZombies.getInstance(), STEALTH_CREEPER_PDC_KEY);
+        return creeper.getPersistentDataContainer().has(key, PersistentDataType.BYTE);
+    }
+
+    private void startGlobalStealthCreeperEnforcer() {
+        org.bukkit.Bukkit.getScheduler().runTaskTimer(
+            com.frigidora.toomuchzombies.TooMuchZombies.getInstance(),
+            () -> {
+                for (World world : org.bukkit.Bukkit.getWorlds()) {
+                    for (Entity entity : world.getEntitiesByClass(Creeper.class)) {
+                        configureStealthCreeper((Creeper) entity);
+                    }
+                }
+            },
+            40L,
+            100L
+        );
     }
 
     @EventHandler
@@ -714,6 +751,7 @@ public class GameEventListener implements Listener {
 
     @EventHandler
     public void onExplode(EntityExplodeEvent event) {
+        event.setYield(0.0f);
         notifyNoise(event.getLocation(), 40.0, null);
     }
 
