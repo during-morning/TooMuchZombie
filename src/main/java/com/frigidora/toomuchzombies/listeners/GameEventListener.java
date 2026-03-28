@@ -32,6 +32,7 @@ import org.bukkit.event.entity.EntityTargetLivingEntityEvent;
 import org.bukkit.event.player.PlayerToggleSprintEvent;
 import org.bukkit.enchantments.Enchantment;
 import org.bukkit.inventory.ItemStack;
+import org.bukkit.inventory.meta.Damageable;
 import org.bukkit.inventory.meta.EnchantmentStorageMeta;
 import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.metadata.FixedMetadataValue;
@@ -68,13 +69,17 @@ public class GameEventListener implements Listener {
 
     @EventHandler
     public void onSpawn(CreatureSpawnEvent event) {
-        if (event.getSpawnReason() == CreatureSpawnEvent.SpawnReason.CUSTOM) return;
-
         LivingEntity entity = event.getEntity();
         Location loc = entity.getLocation();
         boolean convertible = isConvertibleHostile(entity);
+        boolean customSpawn = event.getSpawnReason() == CreatureSpawnEvent.SpawnReason.CUSTOM;
 
-        if (loc.getWorld().getEnvironment() == World.Environment.THE_END) {
+        // CUSTOM 生成来源：只对“可转换怪”强制转换；其它实体（尤其是插件自定义僵尸）保持原样。
+        if (customSpawn && !convertible) {
+            return;
+        }
+
+        if (!customSpawn && loc.getWorld().getEnvironment() == World.Environment.THE_END) {
             if (ZombieAIManager.getInstance().getZombieCountInWorld(loc.getWorld()) >= END_WORLD_ZOMBIE_CAP
                 || countManagedZombiesNear(loc, 80.0) >= END_NEARBY_ZOMBIE_CAP) {
                 event.setCancelled(true);
@@ -82,57 +87,59 @@ public class GameEventListener implements Listener {
             }
         }
 
-        if (!ZombieFactory.evaluateSpawnPipeline(loc, entity.getType())) {
+        if (!customSpawn && !ZombieFactory.evaluateSpawnPipeline(loc, entity.getType())) {
             event.setCancelled(true);
             return;
         }
 
-        // 信标保护区检查：50 格范围内禁止生成僵尸和幻翼
-        if (entity.getType() == EntityType.ZOMBIE || entity.getType() == EntityType.PHANTOM) {
-            if (com.frigidora.toomuchzombies.mechanics.BeaconManager.getInstance().isNearActiveBeacon(loc, 50.0)) {
-                event.setCancelled(true);
-                return;
-            }
-        }
-
-        int globalLimit = BloodMoonManager.getInstance().isBloodMoon(loc.getWorld()) ? 1200 : 900;
-        if (ZombieAIManager.getInstance().getZombieCount() >= globalLimit) {
-            if (entity instanceof Zombie ||
-                entity instanceof AbstractSkeleton ||
-                entity instanceof Creeper ||
-                entity instanceof Spider ||
-                entity instanceof Enderman ||
-                entity instanceof Witch) {
-
-                event.setCancelled(true);
-                return;
-            }
-        }
-
-        int perPlayerLimit = BloodMoonManager.getInstance().isBloodMoon(loc.getWorld()) ? 92 : 72;
-
-        // 查找最近的玩家
-        Player nearest = null;
-        double minDistSq = Double.MAX_VALUE;
-        for (Player p : loc.getWorld().getPlayers()) {
-            double d = p.getLocation().distanceSquared(loc);
-            if (d < minDistSq) {
-                minDistSq = d;
-                nearest = p;
-            }
-        }
-
-        if (nearest != null && minDistSq < 96 * 96) { // 放宽到 96 格范围内的生成
-            int nearbyZombies = 0;
-            for (Entity e : nearest.getNearbyEntities(96, 96, 96)) {
-                if (e instanceof Zombie) {
-                    nearbyZombies++;
+        if (!customSpawn) {
+            // 信标保护区检查：50 格范围内禁止生成僵尸和幻翼
+            if (entity.getType() == EntityType.ZOMBIE || entity.getType() == EntityType.PHANTOM) {
+                if (com.frigidora.toomuchzombies.mechanics.BeaconManager.getInstance().isNearActiveBeacon(loc, 50.0)) {
+                    event.setCancelled(true);
+                    return;
                 }
             }
 
-            if (nearbyZombies >= perPlayerLimit) {
-                event.setCancelled(true);
-                return;
+            int globalLimit = BloodMoonManager.getInstance().isBloodMoon(loc.getWorld()) ? 1200 : 900;
+            if (ZombieAIManager.getInstance().getZombieCount() >= globalLimit) {
+                if (entity instanceof Zombie ||
+                    entity instanceof AbstractSkeleton ||
+                    entity instanceof Creeper ||
+                    entity instanceof Spider ||
+                    entity instanceof Enderman ||
+                    entity instanceof Witch) {
+
+                    event.setCancelled(true);
+                    return;
+                }
+            }
+
+            int perPlayerLimit = BloodMoonManager.getInstance().isBloodMoon(loc.getWorld()) ? 92 : 72;
+
+            // 查找最近的玩家
+            Player nearest = null;
+            double minDistSq = Double.MAX_VALUE;
+            for (Player p : loc.getWorld().getPlayers()) {
+                double d = p.getLocation().distanceSquared(loc);
+                if (d < minDistSq) {
+                    minDistSq = d;
+                    nearest = p;
+                }
+            }
+
+            if (nearest != null && minDistSq < 96 * 96) { // 放宽到 96 格范围内的生成
+                int nearbyZombies = 0;
+                for (Entity e : nearest.getNearbyEntities(96, 96, 96)) {
+                    if (e instanceof Zombie) {
+                        nearbyZombies++;
+                    }
+                }
+
+                if (nearbyZombies >= perPlayerLimit) {
+                    event.setCancelled(true);
+                    return;
+                }
             }
         }
 
@@ -154,6 +161,9 @@ public class GameEventListener implements Listener {
     }
 
     private void spawnConvertedZombie(Location loc) {
+        if (!ZombieFactory.canSpawnManagedZombie(loc)) {
+            return;
+        }
         Zombie z = (Zombie) loc.getWorld().spawnEntity(loc, EntityType.ZOMBIE);
         ZombieFactory.assignRole(z);
         calculateAndApplyStats(null, z, loc);
@@ -191,7 +201,8 @@ public class GameEventListener implements Listener {
             return;
         }
         creeper.setMetadata(PENDING_CREEPER_CONVERT, new FixedMetadataValue(com.frigidora.toomuchzombies.TooMuchZombies.getInstance(), true));
-        creeper.addPotionEffect(new PotionEffect(PotionEffectType.INVISIBILITY, 40, 0, false, false, false));
+        creeper.setInvisible(true);
+        creeper.addPotionEffect(new PotionEffect(PotionEffectType.INVISIBILITY, 40, 0, false, false, false), true);
 
         org.bukkit.Bukkit.getScheduler().runTaskLater(
             com.frigidora.toomuchzombies.TooMuchZombies.getInstance(),
@@ -203,17 +214,21 @@ public class GameEventListener implements Listener {
                 if (cLoc.getWorld() == null) {
                     return;
                 }
+                creeper.removeMetadata(PENDING_CREEPER_CONVERT, com.frigidora.toomuchzombies.TooMuchZombies.getInstance());
                 creeper.remove();
-                spawnConvertedZombie(cLoc);
+                // 苦力怕专属转换：固定转为自爆僵尸。
+                spawnZombie(cLoc, ZombieRole.SUICIDE);
             },
             40L
         );
     }
 
     private void spawnZombie(Location loc, ZombieRole role) {
+        if (!ZombieFactory.canSpawnManagedZombie(loc)) {
+            return;
+        }
         Zombie zombie = (Zombie) loc.getWorld().spawnEntity(loc, EntityType.ZOMBIE);
         ZombieFactory.assignRole(zombie, role);
-        calculateAndApplyStats(null, zombie, loc);
     }
 
     @EventHandler
@@ -536,24 +551,38 @@ public class GameEventListener implements Listener {
     }
 
     private void addZombieDrops(EntityDeathEvent event, Zombie zombie, int level) {
-        double ironChance = Math.min(0.65, 0.10 + 0.035 * level);
-        double goldChance = Math.min(0.45, 0.06 + 0.025 * level);
-        double gunpowderChance = Math.min(0.35, 0.04 + 0.018 * level);
-        double boneMealChance = Math.min(0.70, 0.14 + 0.035 * level);
-        double spiderEyeChance = Math.min(0.32, 0.03 + 0.018 * level);
-        double bookChance = Math.min(0.30, 0.02 + 0.02 * level);
-        double gearChance = Math.min(0.45, 0.03 + 0.03 * level);
+        double progression = Math.max(0.0, Math.min(1.0, (level - 1.0) / 11.0));
+        int bonusRolls = level >= 10 ? 2 : (level >= 6 ? 1 : 0);
+        int totalRolls = 1 + bonusRolls;
 
-        if (random.nextDouble() < ironChance) event.getDrops().add(new ItemStack(Material.IRON_INGOT, 1 + random.nextInt(1 + Math.max(1, level / 4))));
-        if (random.nextDouble() < goldChance) event.getDrops().add(new ItemStack(Material.GOLD_INGOT, 1 + random.nextInt(Math.max(1, level / 6))));
-        if (random.nextDouble() < gunpowderChance) event.getDrops().add(new ItemStack(Material.GUNPOWDER, 1 + (level >= 8 ? random.nextInt(2) : 0)));
-        if (random.nextDouble() < boneMealChance) event.getDrops().add(new ItemStack(Material.BONE_MEAL, 1 + random.nextInt(2 + Math.max(1, level / 5))));
-        if (random.nextDouble() < spiderEyeChance) event.getDrops().add(new ItemStack(Material.SPIDER_EYE, 1 + (level >= 10 ? 1 : 0)));
+        double resourceChance = 0.16 + progression * 0.32;
+        double utilityChance = 0.18 + progression * 0.24;
+        double rareChance = progression * 0.22;
+        double bookChance = 0.015 + progression * 0.10;
+        double gearChance = 0.008 + progression * 0.075;
 
-        if (level >= 9 && random.nextDouble() < 0.25) {
-            event.getDrops().add(new ItemStack(Material.EMERALD, 1 + random.nextInt(2)));
+        for (int i = 0; i < totalRolls; i++) {
+            if (random.nextDouble() < resourceChance) {
+                event.getDrops().add(rollMetalDrop(level));
+            }
+            if (random.nextDouble() < utilityChance) {
+                if (random.nextDouble() < 0.62) {
+                    int boneAmount = 1 + random.nextInt(1 + Math.max(1, level / 5));
+                    event.getDrops().add(new ItemStack(Material.BONE_MEAL, Math.min(5, boneAmount)));
+                } else {
+                    int powderAmount = 1 + (level >= 9 && random.nextDouble() < 0.35 ? 1 : 0);
+                    event.getDrops().add(new ItemStack(Material.GUNPOWDER, powderAmount));
+                }
+            }
+            if (random.nextDouble() < rareChance) {
+                event.getDrops().add(new ItemStack(Material.SPIDER_EYE, 1 + (level >= 11 && random.nextDouble() < 0.30 ? 1 : 0)));
+            }
         }
-        if (level >= 11 && random.nextDouble() < 0.18) {
+
+        if (level >= 9 && random.nextDouble() < 0.06 + progression * 0.12) {
+            event.getDrops().add(new ItemStack(Material.EMERALD, 1 + (level >= 12 && random.nextDouble() < 0.35 ? 1 : 0)));
+        }
+        if (level >= 11 && random.nextDouble() < 0.015 + progression * 0.035) {
             event.getDrops().add(new ItemStack(Material.DIAMOND, 1));
         }
 
@@ -563,7 +592,7 @@ public class GameEventListener implements Listener {
             if (meta instanceof EnchantmentStorageMeta) {
                 EnchantmentStorageMeta es = (EnchantmentStorageMeta) meta;
                 Enchantment ench = pickRandomBookEnchant();
-                int enchLevel = Math.max(1, Math.min(5, 1 + level / 2 + random.nextInt(2)));
+                int enchLevel = Math.max(1, Math.min(4, 1 + level / 4 + random.nextInt(2)));
                 es.addStoredEnchant(ench, Math.min(enchLevel, ench.getMaxLevel()), true);
                 book.setItemMeta(es);
             }
@@ -574,6 +603,16 @@ public class GameEventListener implements Listener {
             ItemStack gear = pickRandomEnchantedGear(level);
             if (gear != null) event.getDrops().add(gear);
         }
+    }
+
+    private ItemStack rollMetalDrop(int level) {
+        double goldWeight = Math.min(0.55, 0.18 + level * 0.03);
+        Material material = random.nextDouble() < goldWeight ? Material.GOLD_INGOT : Material.IRON_INGOT;
+        int amount = 1 + (level >= 8 && random.nextDouble() < 0.35 ? 1 : 0);
+        if (level >= 12 && random.nextDouble() < 0.20) {
+            amount++;
+        }
+        return new ItemStack(material, Math.min(4, amount));
     }
 
     private Enchantment pickRandomBookEnchant() {
@@ -592,24 +631,66 @@ public class GameEventListener implements Listener {
             Material.IRON_HELMET, Material.IRON_CHESTPLATE, Material.IRON_LEGGINGS, Material.IRON_BOOTS,
             Material.IRON_SWORD
         };
+        Material[] golden = new Material[] {
+            Material.GOLDEN_HELMET, Material.GOLDEN_CHESTPLATE, Material.GOLDEN_LEGGINGS, Material.GOLDEN_BOOTS,
+            Material.GOLDEN_SWORD
+        };
         Material[] diamond = new Material[] {
             Material.DIAMOND_HELMET, Material.DIAMOND_CHESTPLATE, Material.DIAMOND_LEGGINGS, Material.DIAMOND_BOOTS,
             Material.DIAMOND_SWORD
         };
-        Material[] pool = level >= 5 ? diamond : iron;
+        Material[] netherite = new Material[] {
+            Material.NETHERITE_HELMET, Material.NETHERITE_CHESTPLATE, Material.NETHERITE_LEGGINGS, Material.NETHERITE_BOOTS,
+            Material.NETHERITE_SWORD
+        };
+
+        double roll = random.nextDouble();
+        Material[] pool;
+        if (level <= 4) {
+            pool = roll < 0.82 ? iron : golden;
+        } else if (level <= 8) {
+            if (roll < 0.66) pool = iron;
+            else if (roll < 0.93) pool = golden;
+            else pool = diamond;
+        } else if (level <= 11) {
+            if (roll < 0.52) pool = iron;
+            else if (roll < 0.79) pool = golden;
+            else if (roll < 0.985) pool = diamond;
+            else pool = netherite;
+        } else {
+            if (roll < 0.42) pool = iron;
+            else if (roll < 0.69) pool = golden;
+            else if (roll < 0.97) pool = diamond;
+            else pool = netherite;
+        }
         Material mat = pool[random.nextInt(pool.length)];
 
         ItemStack item = new ItemStack(mat);
-        int enchCount = 1 + (level >= 6 ? 1 : 0) + (level >= 8 ? 1 : 0);
+        int enchCount = 1 + (level >= 10 ? 1 : 0);
+        if (level >= 12 && random.nextDouble() < 0.30) {
+            enchCount++;
+        }
 
         for (int i = 0; i < enchCount; i++) {
             Enchantment ench = pickRandomGearEnchant(mat);
-            int enchLevel = Math.max(1, Math.min(4, 1 + level / 2 + random.nextInt(2)));
+            int enchLevel = Math.max(1, Math.min(3, 1 + level / 5 + random.nextInt(2)));
             item.addUnsafeEnchantment(ench, Math.min(enchLevel, ench.getMaxLevel()));
         }
 
-        if (random.nextDouble() < Math.min(0.30, 0.05 + 0.03 * level)) {
-            item.addUnsafeEnchantment(Enchantment.UNBREAKING, Math.min(3, 1 + level / 3));
+        if (random.nextDouble() < Math.min(0.18, 0.03 + 0.01 * level)) {
+            item.addUnsafeEnchantment(Enchantment.UNBREAKING, Math.min(2, 1 + level / 6));
+        }
+
+        ItemMeta meta = item.getItemMeta();
+        if (meta instanceof Damageable damageable) {
+            int max = mat.getMaxDurability();
+            if (max > 0) {
+                int minDamage = (int) (max * 0.35);
+                int maxDamage = (int) (max * 0.92);
+                int wear = minDamage + random.nextInt(Math.max(1, maxDamage - minDamage + 1));
+                damageable.setDamage(Math.min(max - 1, wear));
+                item.setItemMeta((ItemMeta) damageable);
+            }
         }
 
         return item;
@@ -634,12 +715,6 @@ public class GameEventListener implements Listener {
     @EventHandler
     public void onExplode(EntityExplodeEvent event) {
         notifyNoise(event.getLocation(), 40.0, null);
-
-        if (event.getEntity() instanceof org.bukkit.entity.TNTPrimed tnt && tnt.hasMetadata("ZombieTNT")) {
-            if (com.frigidora.toomuchzombies.mechanics.BeaconManager.getInstance().isNearActiveBeacon(event.getLocation(), 50.0)) {
-                event.blockList().clear();
-            }
-        }
     }
 
     // --- 性能优化：噪音冷却 ---

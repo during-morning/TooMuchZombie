@@ -36,6 +36,8 @@ public class ZombieBuilderBehavior {
     // Optimization: Cache last move target to avoid excessive pathfinding
     private Location lastMoveTarget = null;
     private long lastMoveTime = 0;
+    private BlockFace preferredLateralDir = null;
+    private long preferredLateralUntil = 0L;
 
     public ZombieBuilderBehavior(ZombieAgent agent, ZombieBreakerBehavior breaker) {
         this.agent = agent;
@@ -67,9 +69,13 @@ public class ZombieBuilderBehavior {
                 
                 this.currentStructure = null;
                 this.zombie.getPathfinder().stopPathfinding();
+                this.preferredLateralDir = null;
+                this.preferredLateralUntil = 0L;
             } else {
                 breaker.stopBreaking();
                 planner.stop();
+                this.preferredLateralDir = null;
+                this.preferredLateralUntil = 0L;
             }
         }
     }
@@ -287,8 +293,8 @@ public class ZombieBuilderBehavior {
 
         // 1. 探测障碍物 (Wall Detection)
         if (frontBlock.getType().isSolid() || frontUpBlock.getType().isSolid()) {
-            // 仅在确有高度需求时抬升，避免“无脑天梯”。
-            if (dy > 1 || horizontalDist > 6) { 
+            // 仅在确有高度需求时抬升，避免远距离也盲目起天梯。
+            if (dy > 1) {
                 height = Height.UP;
             } else {
                 // 让结构流转到清障步骤，优先打通路径。
@@ -305,10 +311,43 @@ public class ZombieBuilderBehavior {
             Block leftDown = leftBlock.getRelative(BlockFace.DOWN);
             Block rightBlock = standBlock.getRelative(right);
             Block rightDown = rightBlock.getRelative(BlockFace.DOWN);
-            
+
+            boolean leftWalkable = !leftBlock.getType().isSolid() && leftDown.getType().isSolid();
+            boolean rightWalkable = !rightBlock.getType().isSolid() && rightDown.getType().isSolid();
+
+            // 短时锁定侧移方向，防止左右反复横跳。
+            long now = System.currentTimeMillis();
+            if (preferredLateralDir != null && now > preferredLateralUntil) {
+                preferredLateralDir = null;
+            }
+
             boolean foundPath = false;
-            if (!leftBlock.getType().isSolid() && leftDown.getType().isSolid()) { dir = left; foundPath = true; }
-            else if (!rightBlock.getType().isSolid() && rightDown.getType().isSolid()) { dir = right; foundPath = true; }
+            if (preferredLateralDir == left && leftWalkable) {
+                dir = left;
+                foundPath = true;
+            } else if (preferredLateralDir == right && rightWalkable) {
+                dir = right;
+                foundPath = true;
+            } else if (leftWalkable && rightWalkable) {
+                int leftDist = Math.abs(target.getBlockX() - (selfPos.x + left.getModX()))
+                    + Math.abs(target.getBlockZ() - (selfPos.z + left.getModZ()));
+                int rightDist = Math.abs(target.getBlockX() - (selfPos.x + right.getModX()))
+                    + Math.abs(target.getBlockZ() - (selfPos.z + right.getModZ()));
+                dir = leftDist <= rightDist ? left : right;
+                foundPath = true;
+                preferredLateralDir = dir;
+                preferredLateralUntil = now + 1400L;
+            } else if (leftWalkable) {
+                dir = left;
+                foundPath = true;
+                preferredLateralDir = left;
+                preferredLateralUntil = now + 1400L;
+            } else if (rightWalkable) {
+                dir = right;
+                foundPath = true;
+                preferredLateralDir = right;
+                preferredLateralUntil = now + 1400L;
+            }
             
             if (foundPath) {
                 // ... (行走逻辑保持不变)

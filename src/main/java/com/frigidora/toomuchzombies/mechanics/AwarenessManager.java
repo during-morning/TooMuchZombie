@@ -8,6 +8,7 @@ import org.bukkit.entity.Zombie;
 
 import com.frigidora.toomuchzombies.ai.ZombieAIManager;
 import com.frigidora.toomuchzombies.ai.ZombieAgent;
+import com.frigidora.toomuchzombies.config.ConfigManager;
 
 public class AwarenessManager {
 
@@ -45,6 +46,9 @@ public class AwarenessManager {
             if (!agent.checkAndResetSkillCooldown("NOISE_REACT", 300L)) {
                 continue;
             }
+            // 记录噪音提示供目标评分使用；噪音只作为“辅助手段”，不直接压过玩家位置。
+            double normalizedStrength = Math.min(1.8, Math.max(0.2, radius / 16.0));
+            agent.setNoiseHint(location, NOISE_INVESTIGATION_TTL_MS, normalizedStrength);
 
             LivingEntity currentTarget = agent.getTargetEntity();
             boolean hasValidTarget = currentTarget != null
@@ -62,15 +66,16 @@ public class AwarenessManager {
                 boolean shouldSwitch = !hasValidTarget || sameTarget;
                 if (hasValidTarget && !sameTarget) {
                     double currentDistSq = zombie.getLocation().distanceSquared(currentTarget.getLocation());
-                    shouldSwitch = shouldSwitch || distSq + 9.0 < currentDistSq;
+                    double switchBias = ConfigManager.getInstance().getTargetingNoiseSwitchBiasDistance();
+                    shouldSwitch = shouldSwitch || distSq + switchBias < currentDistSq;
                 }
 
                 if (strongSignal && shouldSwitch && !lockedOnOther) {
                     agent.clearInvestigationTarget();
+                    agent.setNoiseHint(sourcePlayer.getLocation(), 1400L, 0.45);
                     agent.setTargetEntity(sourcePlayer);
                     agent.setTargetLocation(sourcePlayer.getLocation());
                     agent.lockPursuitOn(sourcePlayer, 3500L);
-                    zombie.setTarget(sourcePlayer);
                     continue;
                 }
             }

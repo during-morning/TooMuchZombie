@@ -10,7 +10,6 @@ import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Zombie;
 import org.bukkit.util.Vector;
 
-import com.frigidora.toomuchzombies.TooMuchZombies;
 import com.frigidora.toomuchzombies.ai.behavior.ZombieBreakerBehavior;
 import com.frigidora.toomuchzombies.ai.behavior.ZombieBuilderBehavior;
 import com.frigidora.toomuchzombies.ai.behavior.ZombieCooperationBehavior;
@@ -113,9 +112,8 @@ public class SmartPathingBehavior {
 
                      Vector fleeDir = z.getLocation().toVector().subtract(nearestBeacon.toVector()).normalize();
                      Location fleeTarget = z.getLocation().add(fleeDir.multiply(14));
-                     if (TooMuchZombies.getNMSHandler() != null) {
-                         TooMuchZombies.getNMSHandler().moveTo(z, fleeTarget, 1.2);
-                     }
+                     agent.setPathIntent(ZombieAgent.PathIntent.EVADE_BEACON, fleeTarget, 1200L);
+                     agent.submitMoveIntent(fleeTarget, 1.2, ZombieAgent.MovementPriority.CRITICAL, ZombieAgent.PathIntent.EVADE_BEACON, 1200L);
                      return;
                  }
              }
@@ -131,10 +129,8 @@ public class SmartPathingBehavior {
 
                  Vector fleeDir = z.getLocation().toVector().subtract(nearestLight.toVector()).normalize();
                  Location fleeTarget = z.getLocation().add(fleeDir.multiply(12));
-                 
-                 if (TooMuchZombies.getNMSHandler() != null) {
-                     TooMuchZombies.getNMSHandler().moveTo(z, fleeTarget, 1.0);
-                 }
+                 agent.setPathIntent(ZombieAgent.PathIntent.EVADE_LIGHT, fleeTarget, 900L);
+                 agent.submitMoveIntent(fleeTarget, 1.0, ZombieAgent.MovementPriority.HIGH, ZombieAgent.PathIntent.EVADE_LIGHT, 900L);
                  return;
              }
         }
@@ -162,6 +158,9 @@ public class SmartPathingBehavior {
             && agent.getRole() != ZombieRole.NURSE
             && z.getLocation().distanceSquared(currentTarget.getLocation()) <= 3.5 * 3.5;
         if (meleeEngaged) {
+            agent.clearPathFailures();
+            agent.setFlanking(false);
+            agent.setPathIntent(ZombieAgent.PathIntent.CLOSE_COMBAT, currentTarget.getLocation(), 650L);
             if (z.getPathfinder().hasPath()) {
                 z.getPathfinder().stopPathfinding();
             }
@@ -169,13 +168,14 @@ public class SmartPathingBehavior {
         }
 
         if (agent.getTicksStuck() >= ConfigManager.getInstance().getRecoveryStuckWarningTicks()) {
+            agent.notePathFailure(ZombieAgent.PathFailureType.HARD_STUCK);
             if (terrainModificationEnabled && (agent.getRole() == ZombieRole.BUILDER || agent.getRole() == ZombieRole.MINER)) {
                 builder.setActive(true);
                 builder.tick();
                 return;
             }
             if (agent.checkAndResetSkillCooldown("FORCED_REPATH", ConfigManager.getInstance().getRecoveryRepathCooldownMs())) {
-                agent.moveTo(targetLoc, 1.1);
+                agent.submitMoveIntent(targetLoc, 1.1, ZombieAgent.MovementPriority.HIGH, ZombieAgent.PathIntent.NAV_CORRIDOR, 750L);
             }
         }
 
@@ -183,7 +183,8 @@ public class SmartPathingBehavior {
         boolean allowFormation = focusTarget != null
             && focusTarget.isValid()
             && focusTarget.getWorld().equals(z.getWorld())
-            && z.getLocation().distanceSquared(focusTarget.getLocation()) >= 8.0 * 8.0;
+            && z.getLocation().distanceSquared(focusTarget.getLocation()) >= 10.0 * 10.0
+            && agent.getCurrentPathFailure() == ZombieAgent.PathFailureType.NONE;
         if (allowFormation) {
             applyFocusFormation(agent, focusTarget, cooperation.getFormationSlotIndex());
             return;
@@ -196,6 +197,7 @@ public class SmartPathingBehavior {
         // 增加建造意愿：专家僵尸更容易开启建筑模式，普通僵尸如果卡住较久也会尝试
         if (terrainModificationEnabled && isSpecialist) {
             if (shouldStartStructuralMode(agent, targetLoc)) {
+                agent.setPathIntent(ZombieAgent.PathIntent.STRUCTURE_BREACH_BUILD, targetLoc, 1500L);
                 builder.setActive(true);
                 builder.tick();
                 return;
@@ -210,18 +212,54 @@ public class SmartPathingBehavior {
             Block feet = z.getLocation().add(flatDir).getBlock();
             Block head = feet.getRelative(BlockFace.UP);
             if (feet.getType().isSolid() || head.getType().isSolid()) {
+                agent.notePathFailure(ZombieAgent.PathFailureType.SHORT_BLOCKED);
                 builder.setActive(true);
                 builder.tick();
                 return;
             }
         }
 
-        // 侧翼逻辑 (保持不变)
+        Location desiredTarget = resolveDesiredAnchor(agent, z, currentTarget, targetLoc);
+        boolean directChase = shouldUseDirectChase(agent, z, currentTarget, desiredTarget);
+        if (directChase) {
+            agent.clearPathFailures();
+            if (agent.canReplanPath(650L, desiredTarget, 7.0)) {
+                agent.setPathIntent(ZombieAgent.PathIntent.DIRECT_CHASE, desiredTarget, 900L);
+            }
+            agent.submitMoveIntent(
+                agent.getPathAnchor() != null ? agent.getPathAnchor() : desiredTarget,
+                desiredTarget.distanceSquared(z.getLocation()) > 36.0 ? 1.0 : 1.08,
+                ZombieAgent.MovementPriority.MEDIUM,
+                ZombieAgent.PathIntent.DIRECT_CHASE,
+                900L
+            );
+        } else {
+            Location corridorAnchor = resolveCorridorAnchor(agent, z, currentTarget, targetLoc);
+            if (corridorAnchor != null) {
+                if (!z.getPathfinder().hasPath()) {
+                    agent.notePathFailure(ZombieAgent.PathFailureType.PATH_MISSING);
+                } else {
+                    agent.notePathFailure(ZombieAgent.PathFailureType.SHORT_BLOCKED);
+                }
+                if (agent.canReplanPath(900L, corridorAnchor, 5.5) || !agent.isPathIntentLeased(ZombieAgent.PathIntent.NAV_CORRIDOR)) {
+                    agent.setPathIntent(ZombieAgent.PathIntent.NAV_CORRIDOR, corridorAnchor, 1500L);
+                }
+                agent.submitMoveIntent(
+                    agent.getPathAnchor() != null ? agent.getPathAnchor() : corridorAnchor,
+                    1.08,
+                    ZombieAgent.MovementPriority.MEDIUM,
+                    ZombieAgent.PathIntent.NAV_CORRIDOR,
+                    1500L
+                );
+            }
+        }
+
         boolean canFlank = agent.isFlanking()
             && currentTarget != null
             && currentTarget.isValid()
             && currentTarget.getWorld().equals(z.getWorld())
-            && z.getLocation().distanceSquared(currentTarget.getLocation()) >= 9.0 * 9.0;
+            && z.getLocation().distanceSquared(currentTarget.getLocation()) >= 14.0 * 14.0
+            && !agent.isPathIntentLeased(ZombieAgent.PathIntent.DIRECT_CHASE);
         if (canFlank) {
             Vector toTarget = targetLoc.toVector().subtract(z.getLocation().toVector()).setY(0);
             if (toTarget.lengthSquared() > 0.01) {
@@ -229,13 +267,8 @@ public class SmartPathingBehavior {
                 Vector right = new Vector(-toTarget.getZ(), 0, toTarget.getX()).normalize();
                 Location flankTarget = currentTarget.getLocation().clone().add(right.multiply(3.0));
                 flankTarget.setY(z.getLocation().getY());
-                agent.moveTo(flankTarget, 1.12);
+                agent.submitMoveIntent(flankTarget, 1.12, ZombieAgent.MovementPriority.HIGH, ZombieAgent.PathIntent.NAV_CORRIDOR, 1000L);
                 return;
-            }
-        } else {
-            // 确保没有被锁定移动
-            if (!agent.isAiPaused() && currentTarget != null) {
-                agent.moveTo(currentTarget.getLocation(), currentTarget.getLocation().distanceSquared(z.getLocation()) > 36.0 ? 1.0 : 1.08);
             }
         }
         
@@ -327,14 +360,14 @@ public class SmartPathingBehavior {
 
         Location slotLoc = target.clone().add(slotVector).add(separation);
         slotLoc.setY(z.getLocation().getY());
-        agent.moveTo(slotLoc, 1.15);
+        agent.submitMoveIntent(slotLoc, 1.15, ZombieAgent.MovementPriority.MEDIUM, ZombieAgent.PathIntent.NAV_CORRIDOR, 1100L);
     }
 
     private void handleNoTargetBehavior(ZombieAgent agent) {
         Zombie z = agent.getZombie();
         if (agent.checkAndResetSkillCooldown("IDLE_FLOAT", 600) && z.isInWater()) {
             Location up = z.getLocation().clone().add(0, 1.5, 0);
-            agent.moveTo(up, 1.0);
+            agent.submitMoveIntent(up, 1.0, ZombieAgent.MovementPriority.LOW, ZombieAgent.PathIntent.IDLE, 700L);
             return;
         }
 
@@ -343,7 +376,7 @@ public class SmartPathingBehavior {
             if (z.getLocation().distanceSquared(investigationTarget) <= 4.0) {
                 agent.clearInvestigationTarget();
             } else {
-                agent.moveTo(investigationTarget, 1.0);
+                agent.submitMoveIntent(investigationTarget, 1.0, ZombieAgent.MovementPriority.LOW, ZombieAgent.PathIntent.NAV_CORRIDOR, 1100L);
                 return;
             }
         }
@@ -353,7 +386,7 @@ public class SmartPathingBehavior {
             Location distantLight = LightSourceManager.getInstance().getNearestLightSource(z.getLocation(), 40.0);
             if (distantLight != null && z.getLocation().distanceSquared(distantLight) >= 12 * 12) {
                 agent.setInvestigationTarget(distantLight, 8000L);
-                agent.moveTo(distantLight, 0.95);
+                agent.submitMoveIntent(distantLight, 0.95, ZombieAgent.MovementPriority.LOW, ZombieAgent.PathIntent.NAV_CORRIDOR, 1200L);
                 return;
             }
         }
@@ -371,7 +404,7 @@ public class SmartPathingBehavior {
                 center.multiply(1.0 / allies);
                 Location groupTarget = center.toLocation(z.getWorld());
                 groupTarget.setY(z.getLocation().getY());
-                agent.moveTo(groupTarget, 0.9);
+                agent.submitMoveIntent(groupTarget, 0.9, ZombieAgent.MovementPriority.LOW, ZombieAgent.PathIntent.IDLE, 1200L);
                 return;
             }
         }
@@ -383,7 +416,7 @@ public class SmartPathingBehavior {
             Location target = z.getLocation().clone().add(Math.cos(angle) * radius, 0, Math.sin(angle) * radius);
             Block feet = target.getBlock();
             if (!feet.getType().isSolid() && feet.getRelative(BlockFace.DOWN).getType().isSolid()) {
-                agent.moveTo(target, 0.9);
+                agent.submitMoveIntent(target, 0.9, ZombieAgent.MovementPriority.LOW, ZombieAgent.PathIntent.IDLE, 1500L);
             }
         }
     }
@@ -406,7 +439,7 @@ public class SmartPathingBehavior {
         if (agent.getRole() == ZombieRole.BUILDER || agent.getRole() == ZombieRole.MINER) {
             return true;
         }
-        return agent.isStuck();
+        return agent.isStuckCached();
     }
     private boolean isFragile(Material material) {
         String name = material.name();
@@ -436,7 +469,7 @@ public class SmartPathingBehavior {
     private boolean shouldStartStructuralMode(ZombieAgent agent, Location targetLoc) {
         Zombie z = agent.getZombie();
         if (targetLoc == null || !z.getWorld().equals(targetLoc.getWorld())) {
-            return agent.isStuck();
+            return agent.isStuckCached();
         }
 
         // 对齐 ZombieGame：受击后短时间内优先追击/战斗，而非立即开始搭建。
@@ -444,12 +477,25 @@ public class SmartPathingBehavior {
             return false;
         }
 
-        if (agent.isStuck()) {
+        if (agent.isStuckCached()) {
+            return true;
+        }
+
+        ZombieAgent.PathFailureType failureType = agent.getCurrentPathFailure();
+        if (failureType == ZombieAgent.PathFailureType.HARD_STUCK) {
+            return true;
+        }
+        if (failureType == ZombieAgent.PathFailureType.PATH_MISSING && agent.getMissingPathStrikes() >= 3) {
             return true;
         }
 
         double distSq = z.getLocation().distanceSquared(targetLoc);
         if (distSq <= 4.0) {
+            return false;
+        }
+
+        if (z.getPathfinder() != null && z.getPathfinder().hasPath()
+            && distSq <= 24.0 * 24.0 && !agent.isStuckCached()) {
             return false;
         }
 
@@ -472,15 +518,87 @@ public class SmartPathingBehavior {
         boolean blockedAhead = first.getType().isSolid() || firstHead.getType().isSolid()
             || second.getType().isSolid() || secondHead.getType().isSolid();
         if (blockedAhead) {
-            return true;
+            return failureType == ZombieAgent.PathFailureType.PATH_MISSING
+                || failureType == ZombieAgent.PathFailureType.HARD_STUCK
+                || distSq <= 12.0 * 12.0;
         }
 
         Block frontGround = first.getRelative(BlockFace.DOWN);
         boolean gapAhead = !frontGround.getType().isSolid();
         if (gapAhead && distSq >= 9.0) {
-            return true;
+            return failureType == ZombieAgent.PathFailureType.PATH_MISSING
+                || failureType == ZombieAgent.PathFailureType.HARD_STUCK
+                || distSq >= 18.0 * 18.0;
         }
 
-        return z.getPathfinder() != null && !z.getPathfinder().hasPath() && distSq >= 25.0;
+        // 兜底：当原版寻路持续拿不到路径并且已有明显卡顿时，才切结构模式。
+        return z.getPathfinder() != null
+            && !z.getPathfinder().hasPath()
+            && distSq >= 20.0 * 20.0
+            && agent.getCurrentPathFailure() != ZombieAgent.PathFailureType.NONE;
+    }
+
+    private boolean shouldUseDirectChase(ZombieAgent agent, Zombie zombie, LivingEntity currentTarget, Location desiredTarget) {
+        if (desiredTarget == null || desiredTarget.getWorld() == null || !desiredTarget.getWorld().equals(zombie.getWorld())) {
+            return false;
+        }
+        if (agent.isPathIntentLeased(ZombieAgent.PathIntent.DIRECT_CHASE) && agent.getPathAnchor() != null) {
+            return agent.getPathAnchor().getWorld() != null
+                && agent.getPathAnchor().getWorld().equals(desiredTarget.getWorld())
+                && agent.getPathAnchor().distanceSquared(desiredTarget) <= 10.0 * 10.0;
+        }
+        if (agent.getCurrentPathFailure() == ZombieAgent.PathFailureType.HARD_STUCK
+            || agent.getCurrentPathFailure() == ZombieAgent.PathFailureType.PATH_MISSING) {
+            return false;
+        }
+        double distSq = zombie.getLocation().distanceSquared(desiredTarget);
+        boolean hasStablePath = zombie.getPathfinder() != null && zombie.getPathfinder().hasPath();
+        boolean lineOfSight = currentTarget != null && currentTarget.isValid() && zombie.hasLineOfSight(currentTarget);
+        boolean smallVerticalGap = Math.abs(desiredTarget.getY() - zombie.getLocation().getY()) <= 1.75;
+        return (lineOfSight || hasStablePath) && smallVerticalGap && distSq <= 40.0 * 40.0;
+    }
+
+    private Location resolveDesiredAnchor(ZombieAgent agent, Zombie zombie, LivingEntity currentTarget, Location fallback) {
+        if (currentTarget != null && currentTarget.isValid() && currentTarget.getWorld().equals(zombie.getWorld())) {
+            Location predicted = currentTarget.getLocation().clone();
+            double distance = zombie.getLocation().distance(predicted);
+            Vector facing = currentTarget.getLocation().getDirection().setY(0);
+            if (distance >= 6.0 && facing.lengthSquared() > 0.01 && zombie.hasLineOfSight(currentTarget)) {
+                facing.normalize().multiply(Math.min(1.25, Math.max(0.25, distance * 0.045)));
+                predicted.add(facing);
+            }
+            predicted.setY(zombie.getLocation().getY());
+            return predicted;
+        }
+        return fallback == null ? null : fallback.clone();
+    }
+
+    private Location resolveCorridorAnchor(ZombieAgent agent, Zombie zombie, LivingEntity currentTarget, Location fallback) {
+        Location target = currentTarget != null && currentTarget.isValid() ? currentTarget.getLocation() : fallback;
+        if (target == null || target.getWorld() == null || !target.getWorld().equals(zombie.getWorld())) {
+            return null;
+        }
+
+        Vector forward = target.toVector().subtract(zombie.getLocation().toVector()).setY(0);
+        if (forward.lengthSquared() < 0.04) {
+            return target.clone();
+        }
+        forward.normalize();
+        Vector lateral = new Vector(-forward.getZ(), 0, forward.getX()).normalize();
+
+        int bias = agent.getLateralBias();
+        if (bias == 0) {
+            bias = (Math.abs(zombie.getUniqueId().hashCode()) % 2 == 0) ? 1 : -1;
+            agent.lockLateralBias(bias, 2200L);
+        }
+
+        double distance = zombie.getLocation().distance(target);
+        double forwardDistance = distance < 8.0 ? 3.0 : 4.5;
+        double lateralDistance = distance < 8.0 ? 1.2 : 1.8;
+        Location corridor = zombie.getLocation().clone()
+            .add(forward.clone().multiply(forwardDistance))
+            .add(lateral.multiply(lateralDistance * bias));
+        corridor.setY(zombie.getLocation().getY());
+        return corridor;
     }
 }

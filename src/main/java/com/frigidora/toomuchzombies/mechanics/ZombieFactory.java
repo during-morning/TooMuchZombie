@@ -30,6 +30,7 @@ import com.frigidora.toomuchzombies.enums.ZombieRole;
 
 public class ZombieFactory {
 
+    private static final String MANAGED_MARKER_KEY = "tmz_managed_zombie";
     private static final Random RANDOM = new Random();
     private static List<Material> placeableBlocks = Arrays.asList(
         Material.COBBLESTONE,
@@ -128,6 +129,11 @@ public class ZombieFactory {
             return false;
         }
 
+        if (countZombiesInChunk(loc.getChunk()) >= cfg.getMaxZombiesPerChunk()) {
+            reject("chunk_cap");
+            return false;
+        }
+
         Player nearest = null;
         double nearestDistSq = Double.MAX_VALUE;
         for (Player p : loc.getWorld().getPlayers()) {
@@ -203,6 +209,59 @@ public class ZombieFactory {
         return true;
     }
 
+    public static boolean canSpawnManagedZombie(Location loc) {
+        if (loc == null || loc.getWorld() == null) {
+            reject("invalid_spawn_loc");
+            return false;
+        }
+
+        ConfigManager cfg = ConfigManager.getInstance();
+        if (ZombieAIManager.getInstance().getZombieCount() >= cfg.getSpawnMaxGlobalZombies()) {
+            reject("global_cap_custom");
+            return false;
+        }
+
+        if (countZombiesInChunk(loc.getChunk()) >= cfg.getMaxZombiesPerChunk()) {
+            reject("chunk_cap_custom");
+            return false;
+        }
+
+        Player nearest = null;
+        double nearestDistSq = Double.MAX_VALUE;
+        for (Player player : loc.getWorld().getPlayers()) {
+            double distSq = player.getLocation().distanceSquared(loc);
+            if (distSq < nearestDistSq) {
+                nearestDistSq = distSq;
+                nearest = player;
+            }
+        }
+
+        if (nearest == null || nearestDistSq > 192 * 192) {
+            reject("no_player_near_custom");
+            return false;
+        }
+
+        int nearbyManaged = 0;
+        for (Entity entity : nearest.getNearbyEntities(96, 96, 96)) {
+            if (entity instanceof Zombie zombie && isManagedZombie(zombie)) {
+                nearbyManaged++;
+            }
+        }
+
+        if (nearbyManaged >= cfg.getSpawnMaxNearPlayer()) {
+            reject("near_player_cap_custom");
+            return false;
+        }
+
+        int relaxedBudget = Math.max(1, cfg.getSpawnBudgetPerPlayer()) * 8;
+        if (nearbyManaged >= relaxedBudget) {
+            reject("budget_custom");
+            return false;
+        }
+
+        return true;
+    }
+
     public static int calculateEncounterLevelNearby(Location loc) {
         int maxLevel = 1;
         double radius = ConfigManager.getInstance().getEncounterNearbyRadius();
@@ -238,8 +297,9 @@ public class ZombieFactory {
     }
 
     public static void assignRole(Zombie zombie, ZombieRole role, int level) {
+        markManagedZombie(zombie);
         ZombieAIManager.getInstance().registerZombie(zombie, role, level);
-        equipZombie(zombie, role);
+        equipZombie(zombie, role, level);
         storeZombieLevel(zombie, level);
         applyLevelAttributes(zombie, level);
         zombie.setCustomName(role.name() + " (Lv." + level + ")");
@@ -369,8 +429,9 @@ public class ZombieFactory {
         return role;
     }
 
-    private static void equipZombie(Zombie zombie, ZombieRole role) {
+    private static void equipZombie(Zombie zombie, ZombieRole role, int level) {
         zombie.getEquipment().clear();
+        setEquipmentDropChances(zombie, 0.0f);
         switch (role) {
             case MINER:
                 Material[] pickaxes = {
@@ -403,20 +464,10 @@ public class ZombieFactory {
                 zombie.getEquipment().setHelmet(new ItemStack(Material.TNT));
                 break;
             case COMBAT:
-                Material armorMat = pickCombatChestplate(zombie.getWorld());
-                Material legs = Material.IRON_LEGGINGS;
-                Material boots = Material.IRON_BOOTS;
-                Material helm = Material.IRON_HELMET;
-
-                if (armorMat == Material.DIAMOND_CHESTPLATE) {
-                    legs = Material.DIAMOND_LEGGINGS;
-                    boots = Material.DIAMOND_BOOTS;
-                    helm = Material.DIAMOND_HELMET;
-                } else if (armorMat == Material.NETHERITE_CHESTPLATE) {
-                    legs = Material.NETHERITE_LEGGINGS;
-                    boots = Material.NETHERITE_BOOTS;
-                    helm = Material.NETHERITE_HELMET;
-                }
+                Material armorMat = pickCombatChestplate(zombie.getWorld(), level);
+                Material legs = toLeggings(armorMat);
+                Material boots = toBoots(armorMat);
+                Material helm = toHelmet(armorMat);
 
                 zombie.getEquipment().setItemInMainHand(new ItemStack(Material.IRON_SWORD));
                 zombie.getEquipment().setItemInOffHand(new ItemStack(Material.SHIELD));
@@ -430,17 +481,74 @@ public class ZombieFactory {
         }
     }
 
-    private static Material pickCombatChestplate(org.bukkit.World world) {
+    private static void setEquipmentDropChances(Zombie zombie, float chance) {
+        if (zombie.getEquipment() == null) {
+            return;
+        }
+        zombie.getEquipment().setItemInMainHandDropChance(chance);
+        zombie.getEquipment().setItemInOffHandDropChance(chance);
+        zombie.getEquipment().setHelmetDropChance(chance);
+        zombie.getEquipment().setChestplateDropChance(chance);
+        zombie.getEquipment().setLeggingsDropChance(chance);
+        zombie.getEquipment().setBootsDropChance(chance);
+    }
+
+    private static Material pickCombatChestplate(org.bukkit.World world, int level) {
         org.bukkit.World.Environment env = world.getEnvironment();
         double r = RANDOM.nextDouble();
 
-        if (env == org.bukkit.World.Environment.NORMAL) {
-            return r < 0.97 ? Material.IRON_CHESTPLATE : Material.DIAMOND_CHESTPLATE;
+        if (env == org.bukkit.World.Environment.NORMAL || env == org.bukkit.World.Environment.CUSTOM) {
+            if (level <= 4) {
+                return r < 0.78 ? Material.IRON_CHESTPLATE : Material.GOLDEN_CHESTPLATE;
+            }
+            if (level <= 8) {
+                if (r < 0.58) return Material.IRON_CHESTPLATE;
+                if (r < 0.88) return Material.GOLDEN_CHESTPLATE;
+                return Material.DIAMOND_CHESTPLATE;
+            }
+            if (level <= 11) {
+                if (r < 0.46) return Material.IRON_CHESTPLATE;
+                if (r < 0.74) return Material.GOLDEN_CHESTPLATE;
+                if (r < 0.985) return Material.DIAMOND_CHESTPLATE;
+                return Material.NETHERITE_CHESTPLATE;
+            }
+            if (r < 0.38) return Material.IRON_CHESTPLATE;
+            if (r < 0.64) return Material.GOLDEN_CHESTPLATE;
+            if (r < 0.975) return Material.DIAMOND_CHESTPLATE;
+            return Material.NETHERITE_CHESTPLATE;
         }
 
-        if (r < 0.65) return Material.IRON_CHESTPLATE;
-        if (r < 0.90) return Material.DIAMOND_CHESTPLATE;
+        if (r < 0.52) return Material.IRON_CHESTPLATE;
+        if (r < 0.76) return Material.GOLDEN_CHESTPLATE;
+        if (r < 0.97) return Material.DIAMOND_CHESTPLATE;
         return Material.NETHERITE_CHESTPLATE;
+    }
+
+    private static Material toLeggings(Material chest) {
+        return switch (chest) {
+            case GOLDEN_CHESTPLATE -> Material.GOLDEN_LEGGINGS;
+            case DIAMOND_CHESTPLATE -> Material.DIAMOND_LEGGINGS;
+            case NETHERITE_CHESTPLATE -> Material.NETHERITE_LEGGINGS;
+            default -> Material.IRON_LEGGINGS;
+        };
+    }
+
+    private static Material toBoots(Material chest) {
+        return switch (chest) {
+            case GOLDEN_CHESTPLATE -> Material.GOLDEN_BOOTS;
+            case DIAMOND_CHESTPLATE -> Material.DIAMOND_BOOTS;
+            case NETHERITE_CHESTPLATE -> Material.NETHERITE_BOOTS;
+            default -> Material.IRON_BOOTS;
+        };
+    }
+
+    private static Material toHelmet(Material chest) {
+        return switch (chest) {
+            case GOLDEN_CHESTPLATE -> Material.GOLDEN_HELMET;
+            case DIAMOND_CHESTPLATE -> Material.DIAMOND_HELMET;
+            case NETHERITE_CHESTPLATE -> Material.NETHERITE_HELMET;
+            default -> Material.IRON_HELMET;
+        };
     }
 
     public static void applyLevelAttributes(Zombie zombie, int level) {
@@ -520,5 +628,28 @@ public class ZombieFactory {
     private static void storeZombieLevel(Zombie zombie, int level) {
         NamespacedKey key = new NamespacedKey(TooMuchZombies.getInstance(), "zombie_level");
         zombie.getPersistentDataContainer().set(key, PersistentDataType.INTEGER, level);
+    }
+
+    public static boolean isManagedZombie(Zombie zombie) {
+        return zombie != null
+            && zombie.getPersistentDataContainer().has(getManagedMarkerKey(), PersistentDataType.BYTE);
+    }
+
+    private static void markManagedZombie(Zombie zombie) {
+        zombie.getPersistentDataContainer().set(getManagedMarkerKey(), PersistentDataType.BYTE, (byte) 1);
+    }
+
+    private static NamespacedKey getManagedMarkerKey() {
+        return new NamespacedKey(TooMuchZombies.getInstance(), MANAGED_MARKER_KEY);
+    }
+
+    private static int countZombiesInChunk(Chunk chunk) {
+        int count = 0;
+        for (Entity entity : chunk.getEntities()) {
+            if (entity instanceof Zombie) {
+                count++;
+            }
+        }
+        return count;
     }
 }

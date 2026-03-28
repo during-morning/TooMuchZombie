@@ -16,7 +16,12 @@ zombie-ai:
   targeting:
     scan-cooldown-ms: 450
     switch-score-delta: 0.22
-    max-range: 56.0
+    max-range: 40.0
+    recognition-range: 20.0
+    player-position-weight: 1.55
+    noise-source-weight: 0.26
+    switch-hysteresis: 0.24
+    noise-switch-bias-distance: 10.0
   recovery:
     repath-cooldown-ms: 700
     stuck-warning-ticks: 35

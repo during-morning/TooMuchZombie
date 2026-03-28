@@ -1,8 +1,10 @@
 package com.frigidora.toomuchzombies.ai;
 
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
+import java.util.PriorityQueue;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -63,6 +65,29 @@ public class ZombieAIManager implements Listener {
     private final java.util.List<UUID>[] shardedAgents = new java.util.List[TIME_SLICES];
     private final Map<UUID, UUID> plannedTargets = new ConcurrentHashMap<>();
     private final AtomicBoolean asyncPlanning = new AtomicBoolean(false);
+    private final PriorityQueue<RemovalTicket> removalQueue = new PriorityQueue<>(Comparator
+        .comparingLong(RemovalTicket::executeAtMs)
+        .thenComparingInt(ticket -> ticket.priority().weight()));
+    private final Map<UUID, RemovalTicket> pendingRemovals = new ConcurrentHashMap<>();
+
+    public enum RemovalPriority {
+        INVALID(0),
+        CHUNK_UNLOAD(1),
+        DISTANT(2),
+        GLOBAL_CAP(3);
+
+        private final int weight;
+
+        RemovalPriority(int weight) {
+            this.weight = weight;
+        }
+
+        public int weight() {
+            return weight;
+        }
+    }
+
+    private record RemovalTicket(UUID uuid, long executeAtMs, String reason, RemovalPriority priority) {}
 
     private record PlayerSnapshot(UUID uuid, UUID worldId, double x, double y, double z, double health, double maxHealth, int foodLevel) {}
     private record AgentSnapshot(UUID uuid, UUID worldId, double x, double y, double z, UUID currentTargetId) {}
@@ -132,6 +157,7 @@ public class ZombieAIManager implements Listener {
     public void unregisterZombie(UUID uuid) {
         ZombieAgent agent = agents.remove(uuid);
         if (agent != null) {
+            cleanupAgentState(agent);
             // 从分片列表移除
             int shardIndex = Math.abs(uuid.hashCode()) % TIME_SLICES;
             shardedAgents[shardIndex].remove(uuid);
@@ -140,6 +166,95 @@ public class ZombieAIManager implements Listener {
         }
         breachRoles.remove(uuid);
         breachRoleLeaseUntil.remove(uuid);
+        plannedTargets.remove(uuid);
+        pendingRemovals.remove(uuid);
+    }
+
+    private void cleanupAgentState(ZombieAgent agent) {
+        if (agent == null) {
+            return;
+        }
+        org.bukkit.block.Block breaking = agent.getBreakerBehavior().getCurrentTarget();
+        if (breaking != null) {
+            unregisterMiningOperation(breaking.getLocation());
+        }
+        Location targetLoc = agent.getLastKnownTargetLocation();
+        if (targetLoc != null) {
+            removeBuildPath(targetLoc);
+        }
+        agent.prepareForRemoval();
+    }
+
+    public void markForCull(UUID uuid, long delayMs, String reason, RemovalPriority priority) {
+        if (uuid == null) {
+            return;
+        }
+        long executeAt = System.currentTimeMillis() + Math.max(0L, delayMs);
+        RemovalTicket existing = pendingRemovals.get(uuid);
+        if (existing != null
+            && existing.executeAtMs() <= executeAt
+            && existing.priority().weight() <= priority.weight()) {
+            return;
+        }
+        ZombieAgent agent = agents.get(uuid);
+        if (agent != null) {
+            cleanupAgentState(agent);
+        }
+        RemovalTicket ticket = new RemovalTicket(
+            uuid,
+            executeAt,
+            reason == null ? "unspecified" : reason,
+            priority == null ? RemovalPriority.DISTANT : priority
+        );
+        pendingRemovals.put(uuid, ticket);
+        synchronized (removalQueue) {
+            removalQueue.add(ticket);
+        }
+    }
+
+    private void processRemovalQueue(boolean highLoad) {
+        int budget = highLoad ? 64 : 28;
+        long now = System.currentTimeMillis();
+        for (int i = 0; i < budget; i++) {
+            RemovalTicket ticket;
+            synchronized (removalQueue) {
+                ticket = removalQueue.poll();
+            }
+            if (ticket == null) {
+                return;
+            }
+
+            RemovalTicket latest = pendingRemovals.get(ticket.uuid());
+            if (latest == null || latest != ticket) {
+                continue;
+            }
+
+            ZombieAgent agent = agents.get(ticket.uuid());
+            if (agent == null) {
+                pendingRemovals.remove(ticket.uuid());
+                unregisterZombie(ticket.uuid());
+                continue;
+            }
+
+            Zombie zombie = agent.getZombie();
+            if (!zombie.isValid() || zombie.isDead()) {
+                pendingRemovals.remove(ticket.uuid());
+                unregisterZombie(ticket.uuid());
+                continue;
+            }
+
+            if (now < ticket.executeAtMs()) {
+                synchronized (removalQueue) {
+                    removalQueue.add(ticket);
+                }
+                continue;
+            }
+
+            cleanupAgentState(agent);
+            zombie.remove();
+            pendingRemovals.remove(ticket.uuid());
+            unregisterZombie(ticket.uuid());
+        }
     }
     
     public ZombieAgent getAgent(UUID uuid) {
@@ -399,6 +514,7 @@ public class ZombieAIManager implements Listener {
         int currentCount = agents.size();
         boolean highLoad = currentCount > 800;
         int globalHardCap = highLoad ? 1100 : 1500;
+        processRemovalQueue(highLoad);
 
         if (org.bukkit.Bukkit.getCurrentTick() % 4 == 0) {
             scheduleAsyncPlanning();
@@ -410,8 +526,7 @@ public class ZombieAIManager implements Listener {
                 if (toRemove <= 0) break;
                 ZombieAgent agent = agents.get(uuid);
                 if (agent != null && agent.getZombie().isValid()) {
-                    agent.getZombie().remove();
-                    unregisterZombie(uuid);
+                    markForCull(uuid, highLoad ? 0L : 40L, "global_hard_cap", RemovalPriority.GLOBAL_CAP);
                     toRemove--;
                 }
             }
@@ -430,12 +545,12 @@ public class ZombieAIManager implements Listener {
         for (UUID uuid : currentShard) {
             ZombieAgent agent = agents.get(uuid);
             if (agent == null || !agent.getZombie().isValid()) {
-                agents.remove(uuid);
-                currentShard.remove(uuid);
+                markForCull(uuid, 0L, "invalid_or_missing", RemovalPriority.INVALID);
                 continue;
             }
             
             Zombie z = agent.getZombie();
+            agent.sampleStuckState(org.bukkit.Bukkit.getCurrentTick());
 
             if (agent.getTicksStuck() >= ConfigManager.getInstance().getRecoveryStuckTeleportTicks()) {
                 if (tryRecoverStuckAgent(agent)) {
@@ -459,9 +574,7 @@ public class ZombieAIManager implements Listener {
                     }
                 }
                 if (!playerNearby) {
-                     z.remove();
-                     agents.remove(uuid);
-                     currentShard.remove(uuid);
+                     markForCull(uuid, highLoad ? 0L : 80L, "no_player_nearby", RemovalPriority.DISTANT);
                      continue;
                 }
             }
@@ -481,6 +594,7 @@ public class ZombieAIManager implements Listener {
     }
 
     public void executeBehavior(ZombieAgent agent) {
+        agent.beginBehaviorTick(org.bukkit.Bukkit.getCurrentTick());
         chooseOrRefreshTarget(agent);
 
         if ("full".equalsIgnoreCase(ConfigManager.getInstance().getAiOverrideMode())) {
@@ -519,6 +633,8 @@ public class ZombieAIManager implements Listener {
             default:
                 break;
         }
+
+        agent.flushMoveIntent();
     }
 
     private void chooseOrRefreshTarget(ZombieAgent agent) {
@@ -542,48 +658,69 @@ public class ZombieAIManager implements Listener {
         if (current != null && current.isValid() && !current.isDead() && current.getWorld().equals(zombie.getWorld())) {
             agent.lockPursuitOn(current, 1200L);
         }
-        LivingEntity best = null;
+        UUID currentTargetId = current != null ? current.getUniqueId() : null;
         UUID plannedId = plannedTargets.get(agent.getUuid());
-        if (plannedId != null) {
-            org.bukkit.entity.Player planned = org.bukkit.Bukkit.getPlayer(plannedId);
-            if (planned != null && planned.isValid() && !planned.isDead() && planned.getWorld().equals(zombie.getWorld())) {
-                best = planned;
+        LivingEntity focusHint = agent.getFocusTargetHint();
+        LivingEntity protectHint = agent.getProtectTargetHint();
+        ConfigManager cfg = ConfigManager.getInstance();
+        double maxRange = Math.min(
+            Math.min(cfg.getTargetingMaxRange(), cfg.getHiveMindSensorRange()),
+            cfg.getTargetingRecognitionRange()
+        );
+        double rangeSq = maxRange * maxRange;
+
+        double currentScore = current != null && current.isValid() && current.getWorld().equals(zombie.getWorld())
+            ? evaluateTargetScore(agent, zombie, current, currentTargetId, plannedId, focusHint, protectHint)
+            : Double.NEGATIVE_INFINITY;
+
+        LivingEntity best = null;
+        double bestScore = Double.NEGATIVE_INFINITY;
+
+        for (LivingEntity hint : new LivingEntity[] {focusHint, protectHint}) {
+            if (hint == null || !hint.isValid() || hint.isDead() || !hint.getWorld().equals(zombie.getWorld())) {
+                continue;
+            }
+            double distSq = zombie.getLocation().distanceSquared(hint.getLocation());
+            if (distSq > (maxRange + 10.0) * (maxRange + 10.0)) {
+                continue;
+            }
+            double score = evaluateTargetScore(agent, zombie, hint, currentTargetId, plannedId, focusHint, protectHint);
+            if (score > bestScore) {
+                bestScore = score;
+                best = hint;
+            }
+        }
+
+        for (Player player : zombie.getWorld().getPlayers()) {
+            if (player.isDead() || player.getGameMode() == GameMode.SPECTATOR) {
+                continue;
+            }
+            double distSq = player.getLocation().distanceSquared(zombie.getLocation());
+            boolean los = zombie.hasLineOfSight(player);
+            if (distSq > rangeSq && !(los && distSq <= (maxRange + 8.0) * (maxRange + 8.0))) {
+                continue;
+            }
+            double score = evaluateTargetScore(agent, zombie, player, currentTargetId, plannedId, focusHint, protectHint);
+            if (score > bestScore) {
+                bestScore = score;
+                best = player;
             }
         }
 
         if (best == null) {
-            double maxRange = Math.min(ConfigManager.getInstance().getTargetingMaxRange(), ConfigManager.getInstance().getHiveMindSensorRange());
-            double rangeSq = maxRange * maxRange;
-            double currentScore = current != null && current.isValid() && current.getWorld().equals(zombie.getWorld())
-                ? evaluateTargetScore(zombie, current)
-                : Double.NEGATIVE_INFINITY;
+            return;
+        }
 
-            double bestScore = Double.NEGATIVE_INFINITY;
-            for (Player player : zombie.getWorld().getPlayers()) {
-                if (player.isDead() || player.getGameMode() == GameMode.SPECTATOR) {
-                    continue;
-                }
-                if (player.getLocation().distanceSquared(zombie.getLocation()) > rangeSq) {
-                    continue;
-                }
-                double score = evaluateTargetScore(zombie, player);
-                if (score > bestScore) {
-                    bestScore = score;
-                    best = player;
-                }
-            }
-
-            if (best == null) {
-                return;
-            }
-
-            double delta = ConfigManager.getInstance().getTargetingSwitchScoreDelta();
-            if (current != null && current.isValid() && !best.equals(current) && bestScore < currentScore + delta) {
-                return;
-            }
+        double delta = Math.max(cfg.getTargetingSwitchScoreDelta(), cfg.getTargetingSwitchHysteresis());
+        if (current != null && current.isValid() && !best.equals(current) && bestScore < currentScore + delta) {
+            return;
         }
 
         if (current != null && current.isValid() && !current.isDead() && current.getWorld().equals(zombie.getWorld())) {
+            if (zombie.hasLineOfSight(current) && zombie.getLocation().distanceSquared(current.getLocation()) <= 16.0 * 16.0
+                && !best.getUniqueId().equals(current.getUniqueId())) {
+                return;
+            }
             if (agent.isPursuitLockedOn(current.getUniqueId()) && !best.getUniqueId().equals(current.getUniqueId())) {
                 return;
             }
@@ -604,20 +741,40 @@ public class ZombieAIManager implements Listener {
         agent.setLastKnownTargetLocation(best.getLocation());
     }
 
-    private double evaluateTargetScore(Zombie zombie, LivingEntity target) {
+    private double evaluateTargetScore(ZombieAgent agent, Zombie zombie, LivingEntity target, UUID currentTargetId, UUID plannedId, LivingEntity focusHint, LivingEntity protectHint) {
         if (!zombie.getWorld().equals(target.getWorld())) {
             return Double.NEGATIVE_INFINITY;
         }
+        ConfigManager cfg = ConfigManager.getInstance();
         double distSq = zombie.getLocation().distanceSquared(target.getLocation());
-        double distanceScore = 1.0 / Math.max(1.0, Math.sqrt(distSq));
+        double distance = Math.max(1.0, Math.sqrt(distSq));
+        double positionWeight = cfg.getTargetingPlayerPositionWeight();
+        double noiseWeight = Math.min(positionWeight * 0.45, cfg.getTargetingNoiseSourceWeight());
+        double distanceScore = positionWeight * (1.0 / distance);
+
         double maxHealth = target.getAttribute(org.bukkit.attribute.Attribute.GENERIC_MAX_HEALTH) != null
             ? target.getAttribute(org.bukkit.attribute.Attribute.GENERIC_MAX_HEALTH).getValue()
             : 20.0;
         double healthScore = 1.0 - Math.max(0.0, Math.min(1.0, target.getHealth() / Math.max(1.0, maxHealth)));
-        double lineOfSightBonus = zombie.hasLineOfSight(target) ? 0.35 : 0.0;
+        boolean lineOfSight = zombie.hasLineOfSight(target);
+        double lineOfSightBonus = lineOfSight ? 0.42 : 0.0;
+        double verticalPenalty = Math.min(0.38, Math.abs(target.getLocation().getY() - zombie.getLocation().getY()) * 0.03);
+
+        Location noiseHint = agent.getNoiseHintLocation();
+        double noiseScore = 0.0;
+        if (noiseHint != null && noiseHint.getWorld() != null && noiseHint.getWorld().equals(zombie.getWorld())) {
+            double hintDist = Math.max(1.0, target.getLocation().distance(noiseHint));
+            noiseScore = noiseWeight * agent.getNoiseHintStrength() * (1.0 / hintDist);
+        }
+
         int foodLevel = target instanceof Player player ? player.getFoodLevel() : 20;
         double hungerScore = target instanceof Player ? (1.0 - Math.max(0.0, Math.min(1.0, foodLevel / 20.0))) * 0.45 : 0.0;
-        return distanceScore + healthScore + hungerScore + lineOfSightBonus;
+        double currentBonus = currentTargetId != null && currentTargetId.equals(target.getUniqueId()) ? 0.34 : 0.0;
+        double planningBonus = plannedId != null && plannedId.equals(target.getUniqueId()) ? 0.10 : 0.0;
+        double focusBonus = focusHint != null && focusHint.getUniqueId().equals(target.getUniqueId()) ? 0.20 : 0.0;
+        double protectBonus = protectHint != null && protectHint.getUniqueId().equals(target.getUniqueId()) ? 0.18 : 0.0;
+        double pursuitBonus = agent.isPursuitLockedOn(target.getUniqueId()) ? 0.24 : 0.0;
+        return distanceScore + healthScore * 0.35 + hungerScore + lineOfSightBonus + noiseScore + currentBonus + planningBonus + focusBonus + protectBonus + pursuitBonus - verticalPenalty;
     }
     
     private void scheduleAsyncPlanning() {
@@ -663,7 +820,11 @@ public class ZombieAIManager implements Listener {
         org.bukkit.Bukkit.getScheduler().runTaskAsynchronously(TooMuchZombies.getInstance(), () -> {
             try {
                 Map<UUID, UUID> newPlans = new java.util.HashMap<>();
-                double maxRange = Math.min(ConfigManager.getInstance().getTargetingMaxRange(), ConfigManager.getInstance().getHiveMindSensorRange());
+                ConfigManager cfg = ConfigManager.getInstance();
+                double maxRange = Math.min(
+                    Math.min(cfg.getTargetingMaxRange(), cfg.getHiveMindSensorRange()),
+                    cfg.getTargetingRecognitionRange()
+                );
                 double rangeSq = maxRange * maxRange;
                 for (AgentSnapshot agent : agentSnapshots) {
                     PlayerSnapshot best = null;
@@ -676,15 +837,15 @@ public class ZombieAIManager implements Listener {
                         double dy = player.y() - agent.y();
                         double dz = player.z() - agent.z();
                         double distSq = dx * dx + dy * dy + dz * dz;
-                        if (distSq > rangeSq || Math.abs(dy) > 28.0) {
+                        if (distSq > rangeSq || Math.abs(dy) > 22.0) {
                             continue;
                         }
-                        double distanceScore = 1.0 / Math.max(1.0, Math.sqrt(distSq));
+                        double distanceScore = cfg.getTargetingPlayerPositionWeight() * (1.0 / Math.max(1.0, Math.sqrt(distSq)));
                         double healthScore = 1.0 - Math.max(0.0, Math.min(1.0, player.health() / Math.max(1.0, player.maxHealth())));
                         double hungerScore = (1.0 - Math.max(0.0, Math.min(1.0, player.foodLevel() / 20.0))) * 0.35;
                         double stickiness = player.uuid().equals(agent.currentTargetId()) ? 0.18 : 0.0;
-                        double verticalPenalty = Math.abs(dy) * 0.015;
-                        double score = distanceScore + healthScore + hungerScore + stickiness - verticalPenalty;
+                        double verticalPenalty = Math.min(0.40, Math.abs(dy) * 0.02);
+                        double score = distanceScore + healthScore * 0.35 + hungerScore + stickiness - verticalPenalty;
                         if (score > bestScore) {
                             bestScore = score;
                             best = player;

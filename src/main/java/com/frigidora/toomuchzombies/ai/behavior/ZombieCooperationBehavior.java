@@ -34,8 +34,14 @@ public class ZombieCooperationBehavior {
     private long lastScanTime;
     private long lastBreachSupport;
     private long lastEncirclePlan;
+    private long lastBodyguardPatrolPlan;
 
     private LivingEntity focusTarget;
+    private long focusTargetExpiry;
+    private UUID focusTargetUuid;
+    private int formationSlotIndex;
+    private long formationSlotExpiry;
+    private UUID formationTargetUuid;
     private final Map<String, Integer> nodeHits = new ConcurrentHashMap<>();
 
     public ZombieCooperationBehavior(ZombieAgent agent) {
@@ -90,12 +96,22 @@ public class ZombieCooperationBehavior {
     }
 
     public LivingEntity getFocusTarget() {
+        if (focusTarget == null || System.currentTimeMillis() > focusTargetExpiry || !focusTarget.isValid() || focusTarget.isDead()) {
+            focusTarget = null;
+            focusTargetExpiry = 0L;
+            focusTargetUuid = null;
+        }
         return focusTarget;
     }
 
     public int getFormationSlotIndex() {
-        LivingEntity target = focusTarget;
+        LivingEntity target = getFocusTarget();
         if (target == null || !target.isValid()) return 0;
+        if (formationTargetUuid != null
+            && formationTargetUuid.equals(target.getUniqueId())
+            && System.currentTimeMillis() <= formationSlotExpiry) {
+            return formationSlotIndex;
+        }
 
         java.util.List<UUID> allies = new java.util.ArrayList<>();
         for (Entity e : zombie.getNearbyEntities(24, 12, 24)) {
@@ -113,7 +129,38 @@ public class ZombieCooperationBehavior {
         allies.sort(java.util.Comparator.comparing(UUID::toString));
         int base = Math.max(0, allies.indexOf(zombie.getUniqueId()));
         int roleBias = agent.getRole() == ZombieRole.ARCHER ? 2 : (agent.getRole() == ZombieRole.COMBAT ? 1 : 0);
-        return base + roleBias;
+        formationSlotIndex = base + roleBias;
+        formationTargetUuid = target.getUniqueId();
+        formationSlotExpiry = System.currentTimeMillis() + 2400L;
+        return formationSlotIndex;
+    }
+
+    public void clearTransientState() {
+        focusTarget = null;
+        focusTargetExpiry = 0L;
+        focusTargetUuid = null;
+        formationTargetUuid = null;
+        formationSlotExpiry = 0L;
+        protectTargetUUID = null;
+        agent.setFocusTargetHint(null, 0L);
+        agent.setProtectTargetHint(null, 0L);
+        agent.setFlanking(false);
+    }
+
+    private void lockFocusTarget(LivingEntity target, long ttlMs) {
+        if (target == null || !target.isValid() || target.isDead()) {
+            focusTarget = null;
+            focusTargetExpiry = 0L;
+            focusTargetUuid = null;
+            formationTargetUuid = null;
+            formationSlotExpiry = 0L;
+            agent.setFocusTargetHint(null, 0L);
+            return;
+        }
+        focusTarget = target;
+        focusTargetExpiry = System.currentTimeMillis() + Math.max(350L, ttlMs);
+        focusTargetUuid = target.getUniqueId();
+        agent.setFocusTargetHint(target, ttlMs);
     }
 
     private boolean tryRetreatRegroup() {
@@ -140,12 +187,14 @@ public class ZombieCooperationBehavior {
         if (away.lengthSquared() < 0.01) away = zombie.getLocation().getDirection().setY(0);
         if (away.lengthSquared() > 0.01) away.normalize();
         Location regroup = zombie.getLocation().clone().add(away.multiply(cfg.getCoopRegroupDistance()));
-        agent.moveTo(regroup, 1.2);
+        agent.submitMoveIntent(regroup, 1.2, ZombieAgent.MovementPriority.CRITICAL, ZombieAgent.PathIntent.EVADE_LIGHT, 900L);
         return true;
     }
 
     private boolean tryBreachSupport() {
-        if (agent.getRole() != ZombieRole.BUILDER && agent.getRole() != ZombieRole.MINER) return false;
+        if (agent.getRole() != ZombieRole.BUILDER
+            && agent.getRole() != ZombieRole.MINER
+            && agent.getRole() != ZombieRole.RUSHER) return false;
 
         Location breach = ZombieAIManager.getInstance().getNearestBreachRequest(zombie.getLocation(), 24);
         if (breach == null) return false;
@@ -158,6 +207,8 @@ public class ZombieCooperationBehavior {
             ZombieAIManager.getInstance().forceBreachRole(zombie.getUniqueId(), BreachAssignmentRole.PRIMARY);
         } else if (agent.getRole() == ZombieRole.BUILDER) {
             ZombieAIManager.getInstance().forceBreachRole(zombie.getUniqueId(), BreachAssignmentRole.SUPPORT);
+        } else if (agent.getRole() == ZombieRole.RUSHER) {
+            ZombieAIManager.getInstance().forceBreachRole(zombie.getUniqueId(), BreachAssignmentRole.PRIMARY);
         } else {
             ZombieAIManager.getInstance().assignBreachRole(zombie.getUniqueId(), breach);
         }
@@ -165,14 +216,28 @@ public class ZombieCooperationBehavior {
         if (zombie.getLocation().distanceSquared(breach) <= arriveRadius * arriveRadius) {
             ZombieAIManager.getInstance().fulfillBreachRequest(breach);
         } else {
-            agent.moveTo(breach, 1.2);
+            agent.submitMoveIntent(
+                breach,
+                agent.getRole() == ZombieRole.RUSHER ? 1.3 : 1.2,
+                ZombieAgent.MovementPriority.HIGH,
+                ZombieAgent.PathIntent.NAV_CORRIDOR,
+                1200L
+            );
         }
         lastBreachSupport = now;
-        agent.getBuilderBehavior().setActive(true);
+        if (agent.getRole() == ZombieRole.BUILDER || agent.getRole() == ZombieRole.MINER) {
+            agent.getBuilderBehavior().setActive(true);
+        }
         return true;
     }
 
     private boolean tryFocusFire() {
+        LivingEntity locked = getFocusTarget();
+        if (locked != null && locked.isValid() && !locked.isDead()) {
+            agent.setFocusTargetHint(locked, 1200L);
+            return true;
+        }
+
         double range = ConfigManager.getInstance().getCoopFocusFireRange();
         LivingEntity best = null;
         double bestScore = -1;
@@ -209,10 +274,16 @@ public class ZombieCooperationBehavior {
 
         if (best == null) return false;
 
-        focusTarget = best;
-        zombie.setTarget(best);
-        agent.setTargetEntity(best);
-        agent.setLastKnownTargetLocation(best.getLocation());
+        LivingEntity current = agent.getTargetEntity();
+        if (current != null && current.isValid() && !current.isDead() && current.getWorld().equals(zombie.getWorld())) {
+            double currentDistSq = zombie.getLocation().distanceSquared(current.getLocation());
+            double bestDistSq = zombie.getLocation().distanceSquared(best.getLocation());
+            if (!best.getUniqueId().equals(current.getUniqueId()) && bestDistSq > currentDistSq * 0.72) {
+                return false;
+            }
+        }
+
+        lockFocusTarget(best, 1800L);
         return true;
     }
 
@@ -235,7 +306,7 @@ public class ZombieCooperationBehavior {
             }
         }
 
-        if (engaged >= 2 && zombie.getLocation().distanceSquared(zombie.getTarget().getLocation()) >= 10.0 * 10.0) {
+        if (engaged >= 3 && zombie.getLocation().distanceSquared(zombie.getTarget().getLocation()) >= 12.0 * 12.0) {
             agent.setFlanking(true);
             return true;
         }
@@ -279,7 +350,13 @@ public class ZombieCooperationBehavior {
         Vector slot = toZombie.clone().rotateAroundY(laneAngle).multiply(radius);
         Location move = target.getLocation().clone().add(slot);
         move.setY(zombie.getLocation().getY());
-        agent.moveTo(move, 1.2 + Math.min(0.25, pressure * 0.08));
+        agent.submitMoveIntent(
+            move,
+            1.2 + Math.min(0.25, pressure * 0.08),
+            ZombieAgent.MovementPriority.MEDIUM,
+            ZombieAgent.PathIntent.NAV_CORRIDOR,
+            ConfigManager.getInstance().getCoopEncircleReplanMs()
+        );
         return true;
     }
 
@@ -309,17 +386,21 @@ public class ZombieCooperationBehavior {
         if (vip.getLastDamageCause() instanceof org.bukkit.event.entity.EntityDamageByEntityEvent) {
             Entity damager = ((org.bukkit.event.entity.EntityDamageByEntityEvent) vip.getLastDamageCause()).getDamager();
             if (damager instanceof LivingEntity && !(damager instanceof Zombie)) {
-                zombie.setTarget((LivingEntity) damager);
+                agent.setProtectTargetHint((LivingEntity) damager, 1800L);
                 return true;
             }
         }
 
         double distSq = zombie.getLocation().distanceSquared(vip.getLocation());
         if (distSq > 25.0) {
-            agent.moveTo(vip.getLocation(), 1.1);
-        } else if (distSq < 9.0 && Math.random() < 0.05) {
-            Location patrolLoc = vip.getLocation().add(Math.random() * 6 - 3, 0, Math.random() * 6 - 3);
-            agent.moveTo(patrolLoc, 0.8);
+            agent.submitMoveIntent(vip.getLocation(), 1.1, ZombieAgent.MovementPriority.MEDIUM, ZombieAgent.PathIntent.NAV_CORRIDOR, 1200L);
+        } else if (distSq < 9.0 && System.currentTimeMillis() - lastBodyguardPatrolPlan > 2200L) {
+            lastBodyguardPatrolPlan = System.currentTimeMillis();
+            double baseAngle = (Math.abs(zombie.getUniqueId().hashCode()) % 360) * Math.PI / 180.0;
+            double radius = 1.8 + (Math.abs(zombie.getUniqueId().hashCode() >> 3) % 8) * 0.08;
+            Location patrolLoc = vip.getLocation().clone().add(Math.cos(baseAngle) * radius, 0, Math.sin(baseAngle) * radius);
+            patrolLoc.setY(zombie.getLocation().getY());
+            agent.submitMoveIntent(patrolLoc, 0.78, ZombieAgent.MovementPriority.LOW, ZombieAgent.PathIntent.NAV_CORRIDOR, 1800L);
         }
 
         return true;

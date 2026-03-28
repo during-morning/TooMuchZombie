@@ -30,27 +30,25 @@ public class ZombieSuicideBehavior {
         return isCharging;
     }
 
+    public void resetCharge() {
+        isCharging = false;
+        breachTarget = null;
+        chargeStartTime = 0L;
+    }
+
     public void tick() {
         if (agent.getRole() != ZombieRole.SUICIDE) return;
-
-        // 信标范围内禁止技能（包括自爆冲锋）。
-        if (com.frigidora.toomuchzombies.mechanics.BeaconManager.getInstance().isNearActiveBeacon(zombie.getLocation(), 24.0)) {
-            isCharging = false;
-            breachTarget = null;
-            return;
-        }
 
         // 如果已经在冲锋中
         if (isCharging) {
             if (breachTarget == null) {
-                isCharging = false;
+                resetCharge();
                 return;
             }
             
             // 检查距离和世界
             if (!zombie.getWorld().equals(breachTarget.getWorld())) {
-                isCharging = false;
-                breachTarget = null;
+                resetCharge();
                 return;
             }
             
@@ -61,8 +59,7 @@ public class ZombieSuicideBehavior {
             }
 
             if (System.currentTimeMillis() - chargeStartTime > 5000L) {
-                isCharging = false;
-                breachTarget = null;
+                resetCharge();
                 return;
             }
             
@@ -139,22 +136,6 @@ public class ZombieSuicideBehavior {
     }
 
     private void detonate() {
-        // 信标保护检查：禁止在活跃信标 50 格内破坏方块
-        if (com.frigidora.toomuchzombies.mechanics.BeaconManager.getInstance().isNearActiveBeacon(zombie.getLocation(), 50.0)) {
-            // 哑火效果
-            try {
-                zombie.getWorld().spawnParticle(org.bukkit.Particle.valueOf("SMOKE"), zombie.getLocation(), 20, 0.5, 0.5, 0.5, 0.05);
-            } catch (Exception e) {
-                try {
-                    zombie.getWorld().spawnParticle(org.bukkit.Particle.valueOf("SMOKE_NORMAL"), zombie.getLocation(), 20, 0.5, 0.5, 0.5, 0.05);
-                } catch (Exception ignored) {}
-            }
-            zombie.getWorld().playSound(zombie.getLocation(), org.bukkit.Sound.BLOCK_FIRE_EXTINGUISH, 1.0f, 1.0f);
-            zombie.setHealth(0);
-            zombie.remove();
-            return;
-        }
-
         zombie.getWorld().createExplosion(zombie.getLocation(), 2.8F, false, true);
         zombie.setHealth(0);
         zombie.remove(); // 彻底移除，触发死亡事件

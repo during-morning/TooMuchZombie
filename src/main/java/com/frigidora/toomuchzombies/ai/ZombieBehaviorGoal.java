@@ -42,14 +42,6 @@ public class ZombieBehaviorGoal implements Goal<Zombie> {
 
     @Override
     public EnumSet<GoalType> getTypes() {
-        // 我们没有完全接管移动（Pathfinder 负责那部分），
-        // 但我们可能会发布移动指令。
-        // 如果我们标记为 MOVE，其他 MOVE 目标可能会暂停。
-        // 我们想与其他目标（如 MeleeAttackGoal）并行运行吗？
-        // 或者我们想覆盖它们？
-        // 设计方案是“混合架构”。
-        // 假设我们不声明任何类型，这样我们就会一直运行？
-        // 或者如果我们强制看向某处，我们就声明 LOOK。
-        return EnumSet.noneOf(GoalType.class); 
+        return EnumSet.of(GoalType.MOVE, GoalType.TARGET);
     }
 }

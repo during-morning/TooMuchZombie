@@ -15,6 +15,7 @@ import org.bukkit.potion.PotionType;
 import org.bukkit.util.Vector;
 
 import com.frigidora.toomuchzombies.mechanics.BeaconManager;
+import com.frigidora.toomuchzombies.enums.BreachAssignmentRole;
 
 public class CombatBehavior {
 
@@ -238,38 +239,103 @@ public class CombatBehavior {
 
     private boolean tryHandleBreachTnt(ZombieAgent agent) {
         Zombie zombie = agent.getZombie();
-        Location breach = ZombieAIManager.getInstance().getNearestBreachRequest(zombie.getLocation(), 18.0);
+        Location breach = ZombieAIManager.getInstance().getNearestBreachRequest(zombie.getLocation(), 28.0);
         if (breach == null || breach.getWorld() == null || !breach.getWorld().equals(zombie.getWorld())) {
             return false;
         }
 
-        if (zombie.getLocation().distanceSquared(breach) > 6.0 * 6.0) {
-            agent.moveTo(breach, 1.25);
+        BreachAssignmentRole role = ZombieAIManager.getInstance().assignBreachRole(zombie.getUniqueId(), breach);
+        if (role == BreachAssignmentRole.NONE) {
+            role = BreachAssignmentRole.SUPPORT;
+        }
+
+        double distSq = zombie.getLocation().distanceSquared(breach);
+        if (distSq > 12.0 * 12.0) {
+            agent.submitMoveIntent(breach, 1.25, ZombieAgent.MovementPriority.HIGH, ZombieAgent.PathIntent.NAV_CORRIDOR, 1100L);
             return true;
         }
 
-        if (!agent.checkAndResetSkillCooldown("BREACH_TNT", Math.max(3200L, 6500L - agent.getLevel() * 180L))) {
+        long baseCooldown = role == BreachAssignmentRole.PRIMARY ? 5100L : 6400L;
+        long minCooldown = role == BreachAssignmentRole.PRIMARY ? 2600L : 3400L;
+        long cooldown = Math.max(minCooldown, baseCooldown - agent.getLevel() * 170L);
+        if (!agent.checkAndResetSkillCooldown("BREACH_TNT", cooldown)) {
             return true;
         }
 
-        Block center = breach.getBlock();
-        for (int y = 0; y <= 1; y++) {
-            Block candidate = center.getRelative(0, y, 0);
-            if (candidate.getType().isSolid()) {
-                center = candidate;
-                break;
-            }
+        Block center = pickBreachBlock(breach);
+        Location target = center.getLocation().add(0.5, 0.5, 0.5);
+        boolean plantCharge = distSq <= (role == BreachAssignmentRole.PRIMARY ? 4.2 * 4.2 : 3.2 * 3.2);
+
+        TNTPrimed tnt;
+        if (plantCharge) {
+            Location spawn = target.clone().add(0, 0.1, 0);
+            tnt = zombie.getWorld().spawn(spawn, TNTPrimed.class);
+            tnt.setVelocity(new Vector(0, 0.02, 0));
+            tnt.setFuseTicks(role == BreachAssignmentRole.PRIMARY ? 20 : 24);
+            tnt.setYield(role == BreachAssignmentRole.PRIMARY ? 3.6f : 3.2f);
+        } else {
+            tnt = zombie.getWorld().spawn(zombie.getEyeLocation(), TNTPrimed.class);
+            Vector velocity = calculateVelocity(zombie.getEyeLocation(), target).multiply(1.06);
+            velocity.setY(velocity.getY() + 0.05);
+            tnt.setVelocity(velocity);
+            tnt.setFuseTicks(30);
+            tnt.setYield(role == BreachAssignmentRole.PRIMARY ? 3.4f : 3.0f);
+            agent.submitMoveIntent(breach, 1.22, ZombieAgent.MovementPriority.HIGH, ZombieAgent.PathIntent.NAV_CORRIDOR, 900L);
         }
 
-        Location spawn = center.getLocation().add(0.5, 0.5, 0.5);
-        TNTPrimed tnt = zombie.getWorld().spawn(spawn, TNTPrimed.class);
-        tnt.setFuseTicks(26);
-        tnt.setYield(3.2f);
+        if (role == BreachAssignmentRole.PRIMARY && agent.getLevel() >= 10 && Math.random() < 0.25) {
+            TNTPrimed followUp = zombie.getWorld().spawn(zombie.getEyeLocation(), TNTPrimed.class);
+            Vector velocity = calculateVelocity(zombie.getEyeLocation(), target).multiply(0.98);
+            velocity.setY(velocity.getY() + 0.10);
+            followUp.setVelocity(velocity);
+            followUp.setFuseTicks(36);
+            followUp.setYield(2.6f);
+            followUp.setMetadata("ZombieTNT", new org.bukkit.metadata.FixedMetadataValue(com.frigidora.toomuchzombies.TooMuchZombies.getInstance(), true));
+        }
+
         tnt.setMetadata("ZombieTNT", new org.bukkit.metadata.FixedMetadataValue(com.frigidora.toomuchzombies.TooMuchZombies.getInstance(), true));
-        zombie.getWorld().playSound(zombie.getLocation(), org.bukkit.Sound.ENTITY_TNT_PRIMED, 1.0f, 0.9f);
-        zombie.damage(4.0);
+        zombie.getWorld().playSound(zombie.getLocation(), org.bukkit.Sound.ENTITY_TNT_PRIMED, 1.0f, role == BreachAssignmentRole.PRIMARY ? 1.0f : 0.85f);
+        zombie.damage(role == BreachAssignmentRole.PRIMARY ? 3.5 : 2.5);
         ZombieAIManager.getInstance().fulfillBreachRequest(breach);
         return true;
+    }
+
+    private Block pickBreachBlock(Location breach) {
+        Block origin = breach.getBlock();
+        Block best = origin;
+        int bestScore = blockBreachScore(origin);
+
+        for (int x = -1; x <= 1; x++) {
+            for (int y = -1; y <= 2; y++) {
+                for (int z = -1; z <= 1; z++) {
+                    Block candidate = origin.getRelative(x, y, z);
+                    int score = blockBreachScore(candidate);
+                    if (score > bestScore) {
+                        best = candidate;
+                        bestScore = score;
+                    }
+                }
+            }
+        }
+        return best;
+    }
+
+    private int blockBreachScore(Block block) {
+        if (block == null) return -1;
+        Material type = block.getType();
+        if (!type.isSolid() || type == Material.BEDROCK || type == Material.BARRIER) {
+            return -1;
+        }
+        int score = 10;
+        String name = type.name();
+        if (name.contains("DOOR") || name.contains("TRAPDOOR") || name.contains("FENCE") || name.contains("GLASS")) {
+            score += 14;
+        } else if (name.contains("PLANK") || name.contains("LOG") || name.contains("BRICK") || name.contains("STONE")) {
+            score += 8;
+        } else if (name.contains("OBSIDIAN") || name.contains("ANCIENT_DEBRIS")) {
+            score += 2;
+        }
+        return score;
     }
     
     private void throwPotion(ZombieAgent agent, Location target) {

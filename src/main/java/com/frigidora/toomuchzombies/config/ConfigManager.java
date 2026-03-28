@@ -81,6 +81,26 @@ public class ConfigManager {
         return clampDouble(config.getDouble("zombie-ai.targeting.max-range", 48.0), 8.0, 128.0);
     }
 
+    public double getTargetingRecognitionRange() {
+        return clampDouble(config.getDouble("zombie-ai.targeting.recognition-range", 22.0), 6.0, 48.0);
+    }
+
+    public double getTargetingPlayerPositionWeight() {
+        return clampDouble(config.getDouble("zombie-ai.targeting.player-position-weight", 1.45), 0.1, 6.0);
+    }
+
+    public double getTargetingNoiseSourceWeight() {
+        return clampDouble(config.getDouble("zombie-ai.targeting.noise-source-weight", 0.30), 0.0, 3.0);
+    }
+
+    public double getTargetingSwitchHysteresis() {
+        return clampDouble(config.getDouble("zombie-ai.targeting.switch-hysteresis", 0.22), 0.0, 2.0);
+    }
+
+    public double getTargetingNoiseSwitchBiasDistance() {
+        return clampDouble(config.getDouble("zombie-ai.targeting.noise-switch-bias-distance", 9.0), 0.0, 36.0);
+    }
+
     public String getAiOverrideMode() {
         String mode = config.getString("zombie-ai.override.mode", "hybrid");
         return ("full".equalsIgnoreCase(mode) ? "full" : "hybrid");
