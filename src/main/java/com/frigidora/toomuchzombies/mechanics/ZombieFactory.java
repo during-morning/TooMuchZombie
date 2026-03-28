@@ -571,7 +571,7 @@ public class ZombieFactory {
             zombie.getAttribute(Attribute.GENERIC_ATTACK_DAMAGE).setBaseValue((4.5 + t * 12.0) * bloodMoonBonus);
         }
         if (zombie.getAttribute(Attribute.GENERIC_MOVEMENT_SPEED) != null) {
-            zombie.getAttribute(Attribute.GENERIC_MOVEMENT_SPEED).setBaseValue(0.22 + t * 0.08);
+            zombie.getAttribute(Attribute.GENERIC_MOVEMENT_SPEED).setBaseValue(0.19 + t * 0.05);
         }
         if (zombie.getAttribute(Attribute.GENERIC_ARMOR) != null) {
             double armor = 0.0 + t * 2.2;
@@ -603,7 +603,7 @@ public class ZombieFactory {
         if (level >= 4) {
             zombie.addPotionEffect(new PotionEffect(PotionEffectType.STRENGTH, Integer.MAX_VALUE, 0, true, false, false));
         }
-        if (level >= 6) {
+        if (level >= 10 && BloodMoonManager.getInstance().isBloodMoon(zombie.getWorld())) {
             zombie.addPotionEffect(new PotionEffect(PotionEffectType.SPEED, Integer.MAX_VALUE, 0, true, false, false));
         }
         if (level >= 10) {

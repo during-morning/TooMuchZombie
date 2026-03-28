@@ -113,7 +113,7 @@ public class SmartPathingBehavior {
                      Vector fleeDir = z.getLocation().toVector().subtract(nearestBeacon.toVector()).normalize();
                      Location fleeTarget = z.getLocation().add(fleeDir.multiply(14));
                      agent.setPathIntent(ZombieAgent.PathIntent.EVADE_BEACON, fleeTarget, 1200L);
-                     agent.submitMoveIntent(fleeTarget, 1.2, ZombieAgent.MovementPriority.CRITICAL, ZombieAgent.PathIntent.EVADE_BEACON, 1200L);
+                     agent.submitMoveIntent(fleeTarget, 0.98, ZombieAgent.MovementPriority.CRITICAL, ZombieAgent.PathIntent.EVADE_BEACON, 1200L);
                      return;
                  }
              }
@@ -130,7 +130,7 @@ public class SmartPathingBehavior {
                  Vector fleeDir = z.getLocation().toVector().subtract(nearestLight.toVector()).normalize();
                  Location fleeTarget = z.getLocation().add(fleeDir.multiply(12));
                  agent.setPathIntent(ZombieAgent.PathIntent.EVADE_LIGHT, fleeTarget, 900L);
-                 agent.submitMoveIntent(fleeTarget, 1.0, ZombieAgent.MovementPriority.HIGH, ZombieAgent.PathIntent.EVADE_LIGHT, 900L);
+                 agent.submitMoveIntent(fleeTarget, 0.90, ZombieAgent.MovementPriority.HIGH, ZombieAgent.PathIntent.EVADE_LIGHT, 900L);
                  return;
              }
         }
@@ -175,7 +175,7 @@ public class SmartPathingBehavior {
                 return;
             }
             if (agent.checkAndResetSkillCooldown("FORCED_REPATH", ConfigManager.getInstance().getRecoveryRepathCooldownMs())) {
-                agent.submitMoveIntent(targetLoc, 1.1, ZombieAgent.MovementPriority.HIGH, ZombieAgent.PathIntent.NAV_CORRIDOR, 750L);
+                agent.submitMoveIntent(targetLoc, 0.96, ZombieAgent.MovementPriority.HIGH, ZombieAgent.PathIntent.NAV_CORRIDOR, 750L);
             }
         }
 
@@ -228,7 +228,7 @@ public class SmartPathingBehavior {
             }
             agent.submitMoveIntent(
                 agent.getPathAnchor() != null ? agent.getPathAnchor() : desiredTarget,
-                desiredTarget.distanceSquared(z.getLocation()) > 36.0 ? 1.0 : 1.08,
+                desiredTarget.distanceSquared(z.getLocation()) > 36.0 ? 0.92 : 0.96,
                 ZombieAgent.MovementPriority.MEDIUM,
                 ZombieAgent.PathIntent.DIRECT_CHASE,
                 900L
@@ -246,7 +246,7 @@ public class SmartPathingBehavior {
                 }
                 agent.submitMoveIntent(
                     agent.getPathAnchor() != null ? agent.getPathAnchor() : corridorAnchor,
-                    1.08,
+                    0.94,
                     ZombieAgent.MovementPriority.MEDIUM,
                     ZombieAgent.PathIntent.NAV_CORRIDOR,
                     1500L
@@ -267,7 +267,7 @@ public class SmartPathingBehavior {
                 Vector right = new Vector(-toTarget.getZ(), 0, toTarget.getX()).normalize();
                 Location flankTarget = currentTarget.getLocation().clone().add(right.multiply(3.0));
                 flankTarget.setY(z.getLocation().getY());
-                agent.submitMoveIntent(flankTarget, 1.12, ZombieAgent.MovementPriority.HIGH, ZombieAgent.PathIntent.NAV_CORRIDOR, 1000L);
+                agent.submitMoveIntent(flankTarget, 0.97, ZombieAgent.MovementPriority.HIGH, ZombieAgent.PathIntent.NAV_CORRIDOR, 1000L);
                 return;
             }
         }
@@ -360,7 +360,7 @@ public class SmartPathingBehavior {
 
         Location slotLoc = target.clone().add(slotVector).add(separation);
         slotLoc.setY(z.getLocation().getY());
-        agent.submitMoveIntent(slotLoc, 1.15, ZombieAgent.MovementPriority.MEDIUM, ZombieAgent.PathIntent.NAV_CORRIDOR, 1100L);
+        agent.submitMoveIntent(slotLoc, 0.92, ZombieAgent.MovementPriority.MEDIUM, ZombieAgent.PathIntent.NAV_CORRIDOR, 1100L);
     }
 
     private void handleNoTargetBehavior(ZombieAgent agent) {
@@ -551,6 +551,9 @@ public class SmartPathingBehavior {
             || agent.getCurrentPathFailure() == ZombieAgent.PathFailureType.PATH_MISSING) {
             return false;
         }
+        if (hasDropRiskAhead(zombie, desiredTarget)) {
+            return false;
+        }
         double distSq = zombie.getLocation().distanceSquared(desiredTarget);
         boolean hasStablePath = zombie.getPathfinder() != null && zombie.getPathfinder().hasPath();
         boolean lineOfSight = currentTarget != null && currentTarget.isValid() && zombie.hasLineOfSight(currentTarget);
@@ -600,5 +603,26 @@ public class SmartPathingBehavior {
             .add(lateral.multiply(lateralDistance * bias));
         corridor.setY(zombie.getLocation().getY());
         return corridor;
+    }
+
+    private boolean hasDropRiskAhead(Zombie zombie, Location desiredTarget) {
+        if (zombie == null || !zombie.isValid() || desiredTarget == null || desiredTarget.getWorld() == null) {
+            return false;
+        }
+        if (!zombie.getWorld().equals(desiredTarget.getWorld())) {
+            return false;
+        }
+        if (desiredTarget.getY() < zombie.getLocation().getY() - 0.85) {
+            return true;
+        }
+        Vector direction = desiredTarget.toVector().subtract(zombie.getLocation().toVector()).setY(0);
+        if (direction.lengthSquared() < 0.04) {
+            return false;
+        }
+        direction.normalize().multiply(0.9);
+        Location probe = zombie.getLocation().clone().add(direction);
+        Block below = probe.getBlock().getRelative(BlockFace.DOWN);
+        Block below2 = below.getRelative(BlockFace.DOWN);
+        return !below.getType().isSolid() && !below2.getType().isSolid();
     }
 }

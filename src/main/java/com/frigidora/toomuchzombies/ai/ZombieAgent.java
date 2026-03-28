@@ -6,6 +6,8 @@ import java.util.Map;
 import java.util.UUID;
 
 import org.bukkit.Location;
+import org.bukkit.block.Block;
+import org.bukkit.util.Vector;
 import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Zombie;
 
@@ -81,6 +83,8 @@ public class ZombieAgent {
     private long protectTargetHintExpiry;
     private long pursuitLockUntil;
     private UUID pursuitTargetUuid;
+    private long lastTargetCommitAt = 0L;
+    private UUID lastCommittedTargetUuid;
     
     // 冷却时间映射
     private final Map<String, Long> cooldowns = new HashMap<>();
@@ -350,6 +354,24 @@ public class ZombieAgent {
         return pursuitTargetUuid.equals(targetUuid);
     }
 
+    public boolean canCommitTargetSwitch(UUID nextTargetUuid, long minIntervalMs) {
+        if (nextTargetUuid == null) {
+            return true;
+        }
+        if (lastCommittedTargetUuid == null || lastCommittedTargetUuid.equals(nextTargetUuid)) {
+            return true;
+        }
+        return System.currentTimeMillis() - lastTargetCommitAt >= Math.max(0L, minIntervalMs);
+    }
+
+    public void markTargetCommitted(LivingEntity target) {
+        if (target == null) {
+            return;
+        }
+        lastCommittedTargetUuid = target.getUniqueId();
+        lastTargetCommitAt = System.currentTimeMillis();
+    }
+
     public boolean checkAndResetSkillCooldown(String skillKey, long cooldownMs) {
         long now = System.currentTimeMillis();
         long last = cooldowns.getOrDefault(skillKey, 0L);
@@ -488,7 +510,22 @@ public class ZombieAgent {
         if (pendingMove == null) {
             return;
         }
-        moveTo(pendingMove.destination, pendingMove.speed);
+        Location destination = pendingMove.destination;
+        double speed = sanitizeSpeedForTerrain(destination, pendingMove.speed, pendingMove.intent);
+
+        if (isDropRiskAhead(destination)
+            && (pendingMove.intent == PathIntent.DIRECT_CHASE || pendingMove.intent == PathIntent.NAV_CORRIDOR)) {
+            Location current = zombie.getLocation();
+            Vector direction = destination.toVector().subtract(current.toVector()).setY(0);
+            if (direction.lengthSquared() > 0.04) {
+                direction.normalize().multiply(0.85);
+                destination = current.clone().add(direction);
+                destination.setY(current.getY());
+            }
+            speed = Math.min(speed, 0.80);
+        }
+
+        moveTo(destination, speed);
         pendingMove = null;
     }
 
@@ -687,5 +724,38 @@ public class ZombieAgent {
 
     public void setLastSpatialKey(long lastSpatialKey) {
         this.lastSpatialKey = lastSpatialKey;
+    }
+
+    private double sanitizeSpeedForTerrain(Location destination, double proposedSpeed, PathIntent intent) {
+        double maxSpeed = 1.02;
+        if (intent == PathIntent.EVADE_BEACON || intent == PathIntent.EVADE_LIGHT) {
+            maxSpeed = 0.98;
+        }
+        if (isDropRiskAhead(destination)) {
+            maxSpeed = Math.min(maxSpeed, 0.86);
+        }
+        return Math.max(0.65, Math.min(proposedSpeed, maxSpeed));
+    }
+
+    private boolean isDropRiskAhead(Location destination) {
+        if (zombie == null || !zombie.isValid() || destination == null || destination.getWorld() == null) {
+            return false;
+        }
+        Location current = zombie.getLocation();
+        if (!current.getWorld().equals(destination.getWorld())) {
+            return false;
+        }
+        if (destination.getY() < current.getY() - 0.85) {
+            return true;
+        }
+        Vector direction = destination.toVector().subtract(current.toVector()).setY(0);
+        if (direction.lengthSquared() < 0.04) {
+            return false;
+        }
+        direction.normalize().multiply(0.9);
+        Location probe = current.clone().add(direction);
+        Block below = probe.getBlock().getRelative(org.bukkit.block.BlockFace.DOWN);
+        Block below2 = below.getRelative(org.bukkit.block.BlockFace.DOWN);
+        return !below.getType().isSolid() && !below2.getType().isSolid();
     }
 }

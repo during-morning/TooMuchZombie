@@ -734,9 +734,17 @@ public class ZombieAIManager implements Listener {
             }
         }
 
+        if (current != null && current.isValid() && !best.equals(current)) {
+            boolean inClosePressure = zombie.getLocation().distanceSquared(current.getLocation()) <= 20.0 * 20.0;
+            if (inClosePressure && !agent.canCommitTargetSwitch(best.getUniqueId(), 1600L)) {
+                return;
+            }
+        }
+
         zombie.setTarget(best);
         agent.clearInvestigationTarget();
         agent.setTargetEntity(best);
+        agent.markTargetCommitted(best);
         agent.lockPursuitOn(best, 2800L);
         agent.setLastKnownTargetLocation(best.getLocation());
     }
