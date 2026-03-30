@@ -7,21 +7,34 @@ hive-mind:
 
 zombie-ai:
   override:
-    mode: hybrid
+    mode: full
   break-speed: 1.0
   break-speed-multiplier: 2.4
   build-speed: 1.0
   noise-threshold: 10
   terrain-modification-enabled: true
   targeting:
-    scan-cooldown-ms: 450
+    scan-cooldown-ms: 260
     switch-score-delta: 0.22
-    max-range: 40.0
-    recognition-range: 20.0
+    max-range: 52.0
+    recognition-range: 28.0
     player-position-weight: 1.55
     noise-source-weight: 0.26
     switch-hysteresis: 0.24
     noise-switch-bias-distance: 10.0
+    whitelist: []
+    blacklist: []
+  routing:
+    replan-base-ticks: 5
+    replan-distance-penalty: 0.18
+    last-known-memory-ms: 9000
+  beacon:
+    force-radius: 50.0
+    force-damage-per-second: 1.5
+    combat-exempt-distance: 2.6
+  async:
+    max-plans-per-tick: 48
+    plan-time-budget-ms: 3
   recovery:
     repath-cooldown-ms: 700
     stuck-warning-ticks: 35
@@ -52,11 +65,11 @@ zombie-ai:
     separation-range: 2.2
 
   builder:
-    place-cooldown-ms: 850
-    place-cooldown-ms-lv9: 220
-    place-cooldown-ms-lv12: 180
+    place-cooldown-ms: 620
+    place-cooldown-ms-lv9: 170
+    place-cooldown-ms-lv12: 130
     breach-request-after-ms: 3000
-    max-build-fail-ticks: 40
+    max-build-fail-ticks: 90
     temporary-block-duration-ms: 120000
     temporary-block-decay-window-ms: 30000
     temporary-block-decay-particle-interval-ticks: 10
@@ -92,18 +105,18 @@ zombie-roles:
   suicide: 0.05
 
 spawn:
-  max-zombies-per-chunk: 10
+  max-zombies-per-chunk: 14
   mspt-threshold: 45
   algorithm:
     enabled: true
-    chunk-cooldown-ms: 220
+    chunk-cooldown-ms: 320
     max-global-zombies: 720
-    max-near-player: 84
+    max-near-player: 96
     spawn-budget-per-player: 7
     max-y-diff: 18
     vertical-search-range: 8
     accept-chance: 1.0
-    enforce-night-only: true
+    enforce-night-only: false
 
 level:
   max: 12
@@ -147,3 +160,8 @@ blood-moon:
   chance: 0.08
   multiplier: 1.65
   health-multiplier: 1.20
+
+cleanup:
+  zombie-drops:
+    trigger-world-item-count: 450
+    batch-per-tick: 64

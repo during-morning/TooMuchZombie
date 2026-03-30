@@ -162,6 +162,74 @@ public class ConfigManager {
         return clampDouble(config.getDouble("zombie-ai.pathing.separation-range", 2.2), 0.8, 8.0);
     }
 
+    public int getRoutingReplanBaseTicks() {
+        return clampInt(config.getInt("zombie-ai.routing.replan-base-ticks", 5), 1, 40);
+    }
+
+    public double getRoutingReplanDistancePenalty() {
+        return clampDouble(config.getDouble("zombie-ai.routing.replan-distance-penalty", 0.18), 0.0, 2.0);
+    }
+
+    public long getRoutingLastKnownMemoryMs() {
+        return clampInt(config.getInt("zombie-ai.routing.last-known-memory-ms", 9000), 1000, 60000);
+    }
+
+    public double getBeaconForceRadius() {
+        return clampDouble(config.getDouble("zombie-ai.beacon.force-radius", 50.0), 8.0, 128.0);
+    }
+
+    public double getBeaconForceDamagePerSecond() {
+        return clampDouble(config.getDouble("zombie-ai.beacon.force-damage-per-second", 1.5), 0.0, 20.0);
+    }
+
+    public double getBeaconCombatExemptDistance() {
+        return clampDouble(config.getDouble("zombie-ai.beacon.combat-exempt-distance", 2.6), 0.8, 8.0);
+    }
+
+    public int getAsyncMaxPlansPerTick() {
+        return clampInt(config.getInt("zombie-ai.async.max-plans-per-tick", 48), 8, 2000);
+    }
+
+    public int getAsyncPlanTimeBudgetMs() {
+        return clampInt(config.getInt("zombie-ai.async.plan-time-budget-ms", 3), 1, 50);
+    }
+
+    public java.util.Set<org.bukkit.entity.EntityType> getTargetWhitelist() {
+        java.util.Set<org.bukkit.entity.EntityType> out = java.util.EnumSet.noneOf(org.bukkit.entity.EntityType.class);
+        for (String one : config.getStringList("zombie-ai.targeting.whitelist")) {
+            org.bukkit.entity.EntityType type = org.bukkit.entity.EntityType.fromName(one.toLowerCase(java.util.Locale.ROOT));
+            if (type == null) {
+                try {
+                    type = org.bukkit.entity.EntityType.valueOf(one.toUpperCase(java.util.Locale.ROOT));
+                } catch (IllegalArgumentException ignored) {
+                    type = null;
+                }
+            }
+            if (type != null) {
+                out.add(type);
+            }
+        }
+        return out;
+    }
+
+    public java.util.Set<org.bukkit.entity.EntityType> getTargetBlacklist() {
+        java.util.Set<org.bukkit.entity.EntityType> out = java.util.EnumSet.noneOf(org.bukkit.entity.EntityType.class);
+        for (String one : config.getStringList("zombie-ai.targeting.blacklist")) {
+            org.bukkit.entity.EntityType type = org.bukkit.entity.EntityType.fromName(one.toLowerCase(java.util.Locale.ROOT));
+            if (type == null) {
+                try {
+                    type = org.bukkit.entity.EntityType.valueOf(one.toUpperCase(java.util.Locale.ROOT));
+                } catch (IllegalArgumentException ignored) {
+                    type = null;
+                }
+            }
+            if (type != null) {
+                out.add(type);
+            }
+        }
+        return out;
+    }
+
     public long getBuilderPlaceCooldownMs() {
         return clampInt(config.getInt("zombie-ai.builder.place-cooldown-ms", 1000), 100, 10000);
     }
@@ -281,19 +349,19 @@ public class ConfigManager {
     }
 
     public long getSpawnChunkCooldownMs() {
-        return clampInt(config.getInt("spawn.algorithm.chunk-cooldown-ms", 1200), 0, 120000);
+        return clampInt(config.getInt("spawn.algorithm.chunk-cooldown-ms", 320), 0, 120000);
     }
 
     public int getSpawnMaxGlobalZombies() {
-        return clampInt(config.getInt("spawn.algorithm.max-global-zombies", 3000), 10, 10000);
+        return clampInt(config.getInt("spawn.algorithm.max-global-zombies", 720), 10, 10000);
     }
 
     public int getSpawnMaxNearPlayer() {
-        return clampInt(config.getInt("spawn.algorithm.max-near-player", 160), 1, 500);
+        return clampInt(config.getInt("spawn.algorithm.max-near-player", 96), 1, 500);
     }
 
     public int getSpawnBudgetPerPlayer() {
-        return clampInt(config.getInt("spawn.algorithm.spawn-budget-per-player", 6), 1, 200);
+        return clampInt(config.getInt("spawn.algorithm.spawn-budget-per-player", 7), 1, 200);
     }
 
     public double getSpawnAcceptChance() {
@@ -438,5 +506,13 @@ public class ConfigManager {
 
     public double getPhantomAttackEffectChance() {
         return clampDouble(config.getDouble("phantom.attack-effect-chance", 0.25), 0.0, 1.0);
+    }
+
+    public int getZombieDropCleanupTriggerWorldItemCount() {
+        return clampInt(config.getInt("cleanup.zombie-drops.trigger-world-item-count", 450), 100, 5000);
+    }
+
+    public int getZombieDropCleanupBatchPerTick() {
+        return clampInt(config.getInt("cleanup.zombie-drops.batch-per-tick", 64), 4, 512);
     }
 }

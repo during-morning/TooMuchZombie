@@ -12,6 +12,7 @@ import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Zombie;
 
 import com.frigidora.toomuchzombies.enums.ZombieRole;
+import com.frigidora.toomuchzombies.mechanics.LightSourceManager;
 
 public class ZombieAgent {
     public enum PathIntent {
@@ -20,6 +21,17 @@ public class ZombieAgent {
         NAV_CORRIDOR,
         STRUCTURE_BREACH_BUILD,
         CLOSE_COMBAT,
+        EVADE_BEACON,
+        EVADE_LIGHT
+    }
+
+    public enum MovementIntent {
+        IDLE,
+        LOCK_PURSUIT,
+        CORRIDOR,
+        BREACH,
+        CLOSE,
+        RECOVER,
         EVADE_BEACON,
         EVADE_LIGHT
     }
@@ -125,6 +137,8 @@ public class ZombieAgent {
     private Location pathAnchor;
     private long pathModeLeaseUntil = 0L;
     private long lastReplanAt = 0L;
+    private MovementIntent movementIntent = MovementIntent.IDLE;
+    private long movementIntentLeaseUntil = 0L;
     private int lateralBias = 0;
     private long lateralBiasUntil = 0L;
     private PendingMove pendingMove;
@@ -437,6 +451,10 @@ public class ZombieAgent {
             lateralBias = 0;
             lateralBiasUntil = 0L;
         }
+        if (movementIntentLeaseUntil > 0L && now > movementIntentLeaseUntil) {
+            movementIntent = MovementIntent.IDLE;
+            movementIntentLeaseUntil = 0L;
+        }
     }
 
     public void moveTo(Location loc, double speed) {
@@ -451,6 +469,15 @@ public class ZombieAgent {
         if (!currentLoc.getWorld().equals(loc.getWorld())) {
             return;
         }
+
+        if (!loc.getWorld().isChunkLoaded(loc.getBlockX() >> 4, loc.getBlockZ() >> 4)) {
+            Location clipped = clipToLoadedChunk(currentLoc, loc);
+            if (clipped == null) {
+                return;
+            }
+            loc = clipped;
+        }
+
         if (currentLoc.distanceSquared(loc) <= 1.0) {
             return;
         }
@@ -468,11 +495,37 @@ public class ZombieAgent {
         }
 
         if (com.frigidora.toomuchzombies.TooMuchZombies.getNMSHandler() != null) {
-            com.frigidora.toomuchzombies.TooMuchZombies.getNMSHandler().moveTo(zombie, loc, speed);
+            double effectiveSpeed = speed * getEnvironmentalSpeedMultiplier();
+            com.frigidora.toomuchzombies.TooMuchZombies.getNMSHandler().moveTo(zombie, loc, effectiveSpeed);
             lastMoveCommandLocation = loc.clone();
             lastMoveCommandAt = now;
-            lastMoveCommandSpeed = speed;
+            lastMoveCommandSpeed = effectiveSpeed;
         }
+    }
+
+    private Location clipToLoadedChunk(Location from, Location desired) {
+        if (from == null || desired == null || from.getWorld() == null || desired.getWorld() == null) {
+            return null;
+        }
+        if (!from.getWorld().equals(desired.getWorld())) {
+            return null;
+        }
+        Vector direction = desired.toVector().subtract(from.toVector()).setY(0);
+        if (direction.lengthSquared() < 0.04) {
+            return null;
+        }
+        direction.normalize();
+
+        Location best = null;
+        for (int i = 1; i <= 8; i++) {
+            Location probe = from.clone().add(direction.clone().multiply(i * 1.2));
+            probe.setY(from.getY());
+            if (!probe.getWorld().isChunkLoaded(probe.getBlockX() >> 4, probe.getBlockZ() >> 4)) {
+                break;
+            }
+            best = probe;
+        }
+        return best;
     }
 
     public boolean submitMoveIntent(Location loc, double speed, MovementPriority priority, PathIntent intent, long leaseMs) {
@@ -502,6 +555,7 @@ public class ZombieAgent {
             }
         }
 
+        setMovementIntent(mapPathToMovementIntent(intent), leaseMs);
         pendingMove = new PendingMove(loc.clone(), speed, priority, intent, leaseUntil);
         return true;
     }
@@ -550,6 +604,19 @@ public class ZombieAgent {
 
     public long getPathModeLeaseUntil() {
         return pathModeLeaseUntil;
+    }
+
+    public void setMovementIntent(MovementIntent intent, long leaseMs) {
+        this.movementIntent = intent == null ? MovementIntent.IDLE : intent;
+        this.movementIntentLeaseUntil = System.currentTimeMillis() + Math.max(0L, leaseMs);
+    }
+
+    public MovementIntent getMovementIntent() {
+        return movementIntent;
+    }
+
+    public boolean isMovementIntentLeased(MovementIntent intent) {
+        return this.movementIntent == intent && System.currentTimeMillis() <= movementIntentLeaseUntil;
     }
 
     public Location getPathAnchor() {
@@ -702,6 +769,8 @@ public class ZombieAgent {
         pathIntent = PathIntent.IDLE;
         pathAnchor = null;
         pathModeLeaseUntil = 0L;
+        movementIntent = MovementIntent.IDLE;
+        movementIntentLeaseUntil = 0L;
         setTargetEntity(null);
         setFocusTargetHint(null, 0L);
         setProtectTargetHint(null, 0L);
@@ -757,5 +826,32 @@ public class ZombieAgent {
         Block below = probe.getBlock().getRelative(org.bukkit.block.BlockFace.DOWN);
         Block below2 = below.getRelative(org.bukkit.block.BlockFace.DOWN);
         return !below.getType().isSolid() && !below2.getType().isSolid();
+    }
+
+    private double getEnvironmentalSpeedMultiplier() {
+        if (zombie == null || !zombie.isValid() || zombie.getWorld() == null) {
+            return 1.0;
+        }
+        boolean isDay = zombie.getWorld().getTime() >= 0 && zombie.getWorld().getTime() < 12000;
+        boolean strongLight = LightSourceManager.getInstance().isExposedToStrongLight(zombie.getLocation());
+        if (isDay || strongLight) {
+            return 0.5; // 白天/光源：速度 -50%
+        }
+        return 1.0;
+    }
+
+    private MovementIntent mapPathToMovementIntent(PathIntent intent) {
+        if (intent == null) {
+            return MovementIntent.IDLE;
+        }
+        return switch (intent) {
+            case DIRECT_CHASE -> MovementIntent.LOCK_PURSUIT;
+            case NAV_CORRIDOR -> MovementIntent.CORRIDOR;
+            case STRUCTURE_BREACH_BUILD -> MovementIntent.BREACH;
+            case CLOSE_COMBAT -> MovementIntent.CLOSE;
+            case EVADE_BEACON -> MovementIntent.EVADE_BEACON;
+            case EVADE_LIGHT -> MovementIntent.EVADE_LIGHT;
+            case IDLE -> MovementIntent.IDLE;
+        };
     }
 }

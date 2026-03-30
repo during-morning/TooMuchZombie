@@ -15,16 +15,21 @@ import com.frigidora.toomuchzombies.ai.behavior.ZombieBuilderBehavior;
 import com.frigidora.toomuchzombies.ai.behavior.ZombieCooperationBehavior;
 import com.frigidora.toomuchzombies.ai.behavior.ZombieSuicideBehavior;
 import com.frigidora.toomuchzombies.enums.ZombieRole;
-import com.frigidora.toomuchzombies.mechanics.BeaconManager;
 import com.frigidora.toomuchzombies.mechanics.LightSourceManager;
 import com.frigidora.toomuchzombies.config.ConfigManager;
 
 public class SmartPathingBehavior {
     private final Random random = new Random();
+    private final RouteController routeController;
+
+    public SmartPathingBehavior(RouteController routeController) {
+        this.routeController = routeController;
+    }
     
     public void tick(ZombieAgent agent) {
         Zombie z = agent.getZombie();
         Location targetLoc = agent.getLastKnownTargetLocation();
+        boolean overloadMode = ZombieAIManager.getInstance().isOverloadMode();
         
         // --- 全局 Debuff 系统：白天/强光下减速虚弱 ---
         // 性能优化：每 20 tick (1秒) 检查一次，而不是每 tick
@@ -44,13 +49,23 @@ public class SmartPathingBehavior {
             targetLoc = currentTarget.getLocation();
         }
 
-        final boolean terrainModificationEnabled = ConfigManager.getInstance().isTerrainModificationEnabled();
+        final boolean terrainModificationEnabled = ConfigManager.getInstance().isTerrainModificationEnabled() && !overloadMode;
         if (!terrainModificationEnabled) {
             if (builder.isActive()) {
                 builder.setActive(false);
             }
             if (breaker.isBreaking()) {
                 breaker.stopBreaking();
+            }
+        }
+
+        if (targetLoc != null && !isChunkLoaded(targetLoc)) {
+            Location clipped = clipToLoadedCorridor(z, targetLoc);
+            if (clipped != null) {
+                targetLoc = clipped;
+            } else {
+                handleNoTargetBehavior(agent);
+                return;
             }
         }
 
@@ -93,30 +108,9 @@ public class SmartPathingBehavior {
             }
         }
 
-        // 5. 信标避让（增加滞后与战斗豁免，避免来回踱步）
-        if (agent.checkAndResetSkillCooldown("BEACON_CHECK", 650)) {
-             Location nearestBeacon = BeaconManager.getInstance().getNearestActiveBeacon(z.getLocation(), 24.0);
-             if (nearestBeacon != null) {
-                 double beaconDistSq = z.getLocation().distanceSquared(nearestBeacon);
-                 boolean closeCombat = currentTarget != null
-                     && currentTarget.isValid()
-                     && currentTarget.getWorld().equals(z.getWorld())
-                     && currentTarget.getLocation().distanceSquared(z.getLocation()) <= 16.0;
-
-                 // 已经贴身交战时不强行逃离，避免 AI 在信标边缘反复横跳。
-                 if (closeCombat) {
-                     z.addPotionEffect(new org.bukkit.potion.PotionEffect(org.bukkit.potion.PotionEffectType.WEAKNESS, 40, 1));
-                 } else if (beaconDistSq <= 18.0 * 18.0) {
-                     z.addPotionEffect(new org.bukkit.potion.PotionEffect(org.bukkit.potion.PotionEffectType.WEAKNESS, 40, 2));
-                     z.damage(1.0);
-
-                     Vector fleeDir = z.getLocation().toVector().subtract(nearestBeacon.toVector()).normalize();
-                     Location fleeTarget = z.getLocation().add(fleeDir.multiply(14));
-                     agent.setPathIntent(ZombieAgent.PathIntent.EVADE_BEACON, fleeTarget, 1200L);
-                     agent.submitMoveIntent(fleeTarget, 0.98, ZombieAgent.MovementPriority.CRITICAL, ZombieAgent.PathIntent.EVADE_BEACON, 1200L);
-                     return;
-                 }
-             }
+        // 5. 信标强制区：持续伤害 + 强制驱离（战斗贴脸短窗豁免改路）
+        if (routeController.enforceBeaconZone(agent, currentTarget)) {
+            return;
         }
 
         // 6. 光源避让 (优化版)
@@ -127,9 +121,16 @@ public class SmartPathingBehavior {
              if (nearestLight != null) {
                  applyLightDebuffs(z);
 
-                 Vector fleeDir = z.getLocation().toVector().subtract(nearestLight.toVector()).normalize();
+                 Vector fleeDir = z.getLocation().toVector().subtract(nearestLight.toVector()).setY(0);
+                 if (fleeDir.lengthSquared() < 0.04) {
+                     fleeDir = z.getLocation().getDirection().setY(0);
+                 }
+                 if (fleeDir.lengthSquared() < 0.04) {
+                     return;
+                 }
+                 fleeDir.normalize();
                  Location fleeTarget = z.getLocation().add(fleeDir.multiply(12));
-                 agent.setPathIntent(ZombieAgent.PathIntent.EVADE_LIGHT, fleeTarget, 900L);
+                 routeController.applyRouteState(agent, RouteController.RouteState.RECOVER, ZombieAgent.PathIntent.EVADE_LIGHT, fleeTarget, 900L);
                  agent.submitMoveIntent(fleeTarget, 0.90, ZombieAgent.MovementPriority.HIGH, ZombieAgent.PathIntent.EVADE_LIGHT, 900L);
                  return;
              }
@@ -146,6 +147,15 @@ public class SmartPathingBehavior {
         }
 
         if (targetLoc == null) {
+            Location remembered = agent.getLastKnownTargetLocation();
+            if (remembered != null
+                && remembered.getWorld() != null
+                && remembered.getWorld().equals(z.getWorld())
+                && !agent.hasMemoryExpired(ConfigManager.getInstance().getRoutingLastKnownMemoryMs())) {
+                routeController.applyRouteState(agent, RouteController.RouteState.CORRIDOR, ZombieAgent.PathIntent.NAV_CORRIDOR, remembered, 1400L);
+                agent.submitMoveIntent(remembered, 0.92, ZombieAgent.MovementPriority.MEDIUM, ZombieAgent.PathIntent.NAV_CORRIDOR, 1400L);
+                return;
+            }
             handleNoTargetBehavior(agent);
             return;
         }
@@ -160,7 +170,7 @@ public class SmartPathingBehavior {
         if (meleeEngaged) {
             agent.clearPathFailures();
             agent.setFlanking(false);
-            agent.setPathIntent(ZombieAgent.PathIntent.CLOSE_COMBAT, currentTarget.getLocation(), 650L);
+            routeController.applyRouteState(agent, RouteController.RouteState.CLOSE, ZombieAgent.PathIntent.CLOSE_COMBAT, currentTarget.getLocation(), 650L);
             if (z.getPathfinder().hasPath()) {
                 z.getPathfinder().stopPathfinding();
             }
@@ -175,6 +185,7 @@ public class SmartPathingBehavior {
                 return;
             }
             if (agent.checkAndResetSkillCooldown("FORCED_REPATH", ConfigManager.getInstance().getRecoveryRepathCooldownMs())) {
+                routeController.applyRouteState(agent, RouteController.RouteState.RECOVER, ZombieAgent.PathIntent.NAV_CORRIDOR, targetLoc, 750L);
                 agent.submitMoveIntent(targetLoc, 0.96, ZombieAgent.MovementPriority.HIGH, ZombieAgent.PathIntent.NAV_CORRIDOR, 750L);
             }
         }
@@ -196,8 +207,10 @@ public class SmartPathingBehavior {
         
         // 增加建造意愿：专家僵尸更容易开启建筑模式，普通僵尸如果卡住较久也会尝试
         if (terrainModificationEnabled && isSpecialist) {
-            if (shouldStartStructuralMode(agent, targetLoc)) {
-                agent.setPathIntent(ZombieAgent.PathIntent.STRUCTURE_BREACH_BUILD, targetLoc, 1500L);
+            boolean structureLease = agent.isPathIntentLeased(ZombieAgent.PathIntent.STRUCTURE_BREACH_BUILD);
+            if ((structureLease || agent.checkAndResetSkillCooldown("STRUCT_MODE_ENTER", 1800L))
+                && shouldStartStructuralMode(agent, targetLoc)) {
+                routeController.applyRouteState(agent, RouteController.RouteState.BREACH, ZombieAgent.PathIntent.STRUCTURE_BREACH_BUILD, targetLoc, 1500L);
                 builder.setActive(true);
                 builder.tick();
                 return;
@@ -223,12 +236,14 @@ public class SmartPathingBehavior {
         boolean directChase = shouldUseDirectChase(agent, z, currentTarget, desiredTarget);
         if (directChase) {
             agent.clearPathFailures();
-            if (agent.canReplanPath(650L, desiredTarget, 7.0)) {
-                agent.setPathIntent(ZombieAgent.PathIntent.DIRECT_CHASE, desiredTarget, 900L);
+            double distSq = desiredTarget.distanceSquared(z.getLocation());
+            if (routeController.allowReplan(agent, desiredTarget, distSq, 7.0)
+                || !agent.isPathIntentLeased(ZombieAgent.PathIntent.DIRECT_CHASE)) {
+                routeController.applyRouteState(agent, RouteController.RouteState.LOCK_PURSUIT, ZombieAgent.PathIntent.DIRECT_CHASE, desiredTarget, 900L);
             }
             agent.submitMoveIntent(
                 agent.getPathAnchor() != null ? agent.getPathAnchor() : desiredTarget,
-                desiredTarget.distanceSquared(z.getLocation()) > 36.0 ? 0.92 : 0.96,
+                distSq > 36.0 ? 0.92 : 0.96,
                 ZombieAgent.MovementPriority.MEDIUM,
                 ZombieAgent.PathIntent.DIRECT_CHASE,
                 900L
@@ -241,8 +256,10 @@ public class SmartPathingBehavior {
                 } else {
                     agent.notePathFailure(ZombieAgent.PathFailureType.SHORT_BLOCKED);
                 }
-                if (agent.canReplanPath(900L, corridorAnchor, 5.5) || !agent.isPathIntentLeased(ZombieAgent.PathIntent.NAV_CORRIDOR)) {
-                    agent.setPathIntent(ZombieAgent.PathIntent.NAV_CORRIDOR, corridorAnchor, 1500L);
+                double distSq = corridorAnchor.distanceSquared(z.getLocation());
+                if (routeController.allowReplan(agent, corridorAnchor, distSq, 5.5)
+                    || !agent.isPathIntentLeased(ZombieAgent.PathIntent.NAV_CORRIDOR)) {
+                    routeController.applyRouteState(agent, RouteController.RouteState.CORRIDOR, ZombieAgent.PathIntent.NAV_CORRIDOR, corridorAnchor, 1500L);
                 }
                 agent.submitMoveIntent(
                     agent.getPathAnchor() != null ? agent.getPathAnchor() : corridorAnchor,
@@ -267,6 +284,7 @@ public class SmartPathingBehavior {
                 Vector right = new Vector(-toTarget.getZ(), 0, toTarget.getX()).normalize();
                 Location flankTarget = currentTarget.getLocation().clone().add(right.multiply(3.0));
                 flankTarget.setY(z.getLocation().getY());
+                routeController.applyRouteState(agent, RouteController.RouteState.CORRIDOR, ZombieAgent.PathIntent.NAV_CORRIDOR, flankTarget, 1000L);
                 agent.submitMoveIntent(flankTarget, 0.97, ZombieAgent.MovementPriority.HIGH, ZombieAgent.PathIntent.NAV_CORRIDOR, 1000L);
                 return;
             }
@@ -360,13 +378,18 @@ public class SmartPathingBehavior {
 
         Location slotLoc = target.clone().add(slotVector).add(separation);
         slotLoc.setY(z.getLocation().getY());
+        routeController.applyRouteState(agent, RouteController.RouteState.CORRIDOR, ZombieAgent.PathIntent.NAV_CORRIDOR, slotLoc, 1100L);
         agent.submitMoveIntent(slotLoc, 0.92, ZombieAgent.MovementPriority.MEDIUM, ZombieAgent.PathIntent.NAV_CORRIDOR, 1100L);
     }
 
     private void handleNoTargetBehavior(ZombieAgent agent) {
         Zombie z = agent.getZombie();
+        if (agent.getRole() == ZombieRole.BUILDER || agent.getRole() == ZombieRole.MINER) {
+            return;
+        }
         if (agent.checkAndResetSkillCooldown("IDLE_FLOAT", 600) && z.isInWater()) {
             Location up = z.getLocation().clone().add(0, 1.5, 0);
+            routeController.applyRouteState(agent, RouteController.RouteState.RECOVER, ZombieAgent.PathIntent.IDLE, up, 700L);
             agent.submitMoveIntent(up, 1.0, ZombieAgent.MovementPriority.LOW, ZombieAgent.PathIntent.IDLE, 700L);
             return;
         }
@@ -376,6 +399,7 @@ public class SmartPathingBehavior {
             if (z.getLocation().distanceSquared(investigationTarget) <= 4.0) {
                 agent.clearInvestigationTarget();
             } else {
+                routeController.applyRouteState(agent, RouteController.RouteState.CORRIDOR, ZombieAgent.PathIntent.NAV_CORRIDOR, investigationTarget, 1100L);
                 agent.submitMoveIntent(investigationTarget, 1.0, ZombieAgent.MovementPriority.LOW, ZombieAgent.PathIntent.NAV_CORRIDOR, 1100L);
                 return;
             }
@@ -386,6 +410,7 @@ public class SmartPathingBehavior {
             Location distantLight = LightSourceManager.getInstance().getNearestLightSource(z.getLocation(), 40.0);
             if (distantLight != null && z.getLocation().distanceSquared(distantLight) >= 12 * 12) {
                 agent.setInvestigationTarget(distantLight, 8000L);
+                routeController.applyRouteState(agent, RouteController.RouteState.CORRIDOR, ZombieAgent.PathIntent.NAV_CORRIDOR, distantLight, 1200L);
                 agent.submitMoveIntent(distantLight, 0.95, ZombieAgent.MovementPriority.LOW, ZombieAgent.PathIntent.NAV_CORRIDOR, 1200L);
                 return;
             }
@@ -404,18 +429,26 @@ public class SmartPathingBehavior {
                 center.multiply(1.0 / allies);
                 Location groupTarget = center.toLocation(z.getWorld());
                 groupTarget.setY(z.getLocation().getY());
+                routeController.applyRouteState(agent, RouteController.RouteState.RECOVER, ZombieAgent.PathIntent.IDLE, groupTarget, 1200L);
                 agent.submitMoveIntent(groupTarget, 0.9, ZombieAgent.MovementPriority.LOW, ZombieAgent.PathIntent.IDLE, 1200L);
                 return;
             }
         }
 
-        // 无目标时做低频随机巡游，避免僵尸长时间静止
+        // 无目标时做低频随机巡游，且仅在长时间完全丢失目标后再启用。
+        if (agent.isPursuitLocked() || agent.getPathIntent() == ZombieAgent.PathIntent.NAV_CORRIDOR) {
+            return;
+        }
+        if (!agent.hasMemoryExpired(15000L)) {
+            return;
+        }
         if (agent.checkAndResetSkillCooldown("IDLE_WANDER", 1800)) {
             double angle = random.nextDouble() * Math.PI * 2.0;
             double radius = 4.0 + random.nextDouble() * 3.0;
             Location target = z.getLocation().clone().add(Math.cos(angle) * radius, 0, Math.sin(angle) * radius);
             Block feet = target.getBlock();
             if (!feet.getType().isSolid() && feet.getRelative(BlockFace.DOWN).getType().isSolid()) {
+                routeController.applyRouteState(agent, RouteController.RouteState.RECOVER, ZombieAgent.PathIntent.IDLE, target, 1500L);
                 agent.submitMoveIntent(target, 0.9, ZombieAgent.MovementPriority.LOW, ZombieAgent.PathIntent.IDLE, 1500L);
             }
         }
@@ -624,5 +657,38 @@ public class SmartPathingBehavior {
         Block below = probe.getBlock().getRelative(BlockFace.DOWN);
         Block below2 = below.getRelative(BlockFace.DOWN);
         return !below.getType().isSolid() && !below2.getType().isSolid();
+    }
+
+    private boolean isChunkLoaded(Location loc) {
+        if (loc == null || loc.getWorld() == null) {
+            return false;
+        }
+        return loc.getWorld().isChunkLoaded(loc.getBlockX() >> 4, loc.getBlockZ() >> 4);
+    }
+
+    private Location clipToLoadedCorridor(Zombie zombie, Location desiredTarget) {
+        if (zombie == null || !zombie.isValid() || desiredTarget == null || desiredTarget.getWorld() == null) {
+            return null;
+        }
+        Location current = zombie.getLocation();
+        if (!current.getWorld().equals(desiredTarget.getWorld())) {
+            return null;
+        }
+        Vector direction = desiredTarget.toVector().subtract(current.toVector()).setY(0);
+        if (direction.lengthSquared() < 0.04) {
+            return null;
+        }
+        direction.normalize();
+
+        Location best = null;
+        for (int i = 1; i <= 8; i++) {
+            Location probe = current.clone().add(direction.clone().multiply(i * 1.2));
+            probe.setY(current.getY());
+            if (!isChunkLoaded(probe)) {
+                break;
+            }
+            best = probe;
+        }
+        return best;
     }
 }

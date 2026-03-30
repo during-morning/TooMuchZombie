@@ -8,7 +8,6 @@ import org.bukkit.Location;
 import org.bukkit.NamespacedKey;
 import org.bukkit.entity.Player;
 import org.bukkit.entity.Zombie;
-import org.bukkit.potion.PotionEffect;
 
 import com.destroystokyo.paper.entity.ai.Goal;
 import com.destroystokyo.paper.entity.ai.GoalKey;
@@ -31,13 +30,16 @@ public class PaperNMSHandler implements NMSHandler {
 
     @Override
     public void moveTo(Zombie zombie, Location location, double speed) {
-        // 使用 Paper Pathfinder API 移动
-        double speedR=speed;
-        if(speed<0.0) {speedR=0.0;}
-        else if(speed>1.0) {
-            speedR=1.0;
-            zombie.addPotionEffect(new PotionEffect(org.bukkit.potion.PotionEffectType.SPEED, 10, 1));
+        if (zombie == null || !zombie.isValid() || location == null || location.getWorld() == null) {
+            return;
         }
+        if (!zombie.getWorld().equals(location.getWorld())) {
+            return;
+        }
+        if (!location.getWorld().isChunkLoaded(location.getBlockX() >> 4, location.getBlockZ() >> 4)) {
+            return;
+        }
+        double speedR = Math.max(0.0, Math.min(1.0, speed));
         zombie.getPathfinder().moveTo(location, speedR);
     }
 

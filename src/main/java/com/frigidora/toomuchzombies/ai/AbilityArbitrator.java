@@ -12,11 +12,17 @@ public class AbilityArbitrator {
             return AbilityIntent.IDLE;
         }
 
+        boolean overloadMode = ZombieAIManager.getInstance() != null && ZombieAIManager.getInstance().isOverloadMode();
+
         boolean hasRecentTarget = (agent.getTargetEntity() != null && agent.getTargetEntity().isValid())
             || (agent.getLastKnownTargetLocation() != null && !agent.hasMemoryExpired(7000));
 
         if (agent.getSuicideBehavior().isActive()) {
             return AbilityIntent.SUICIDE_CHARGE;
+        }
+
+        if (overloadMode && !hasRecentTarget) {
+            return AbilityIntent.TARGET_SEARCH;
         }
 
         // 当最近刚锁定目标时，优先进入追击战斗，避免在结构行为/避让行为间来回切换。
@@ -25,7 +31,7 @@ public class AbilityArbitrator {
         }
 
         if (agent.getBuilderBehavior().isActive() || agent.getBreakerBehavior().isBreaking()) {
-            return AbilityIntent.STRUCTURE;
+            return overloadMode ? AbilityIntent.TARGET_SEARCH : AbilityIntent.STRUCTURE;
         }
 
         Location loc = agent.getZombie().getLocation();

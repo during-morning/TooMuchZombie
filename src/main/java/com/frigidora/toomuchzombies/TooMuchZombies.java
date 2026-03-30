@@ -30,6 +30,7 @@ public class TooMuchZombies extends JavaPlugin {
         com.frigidora.toomuchzombies.mechanics.NightHordeManager.initialize();
         com.frigidora.toomuchzombies.mechanics.BeaconManager.initialize();
         com.frigidora.toomuchzombies.mechanics.TemporaryBlockManager.initialize();
+        com.frigidora.toomuchzombies.mechanics.DropCleanupManager.initialize();
         com.frigidora.toomuchzombies.mechanics.ZombieFactory.loadConfig();
         com.frigidora.toomuchzombies.ai.ZombieAIManager.initialize();
         
@@ -44,6 +45,7 @@ public class TooMuchZombies extends JavaPlugin {
 
     @Override
     public void onDisable() {
+        com.frigidora.toomuchzombies.mechanics.DropCleanupManager.shutdown();
         com.frigidora.toomuchzombies.mechanics.TemporaryBlockManager.shutdown();
         if (com.frigidora.toomuchzombies.mechanics.BeaconManager.getInstance() != null) {
             com.frigidora.toomuchzombies.mechanics.BeaconManager.getInstance().saveBeacons();

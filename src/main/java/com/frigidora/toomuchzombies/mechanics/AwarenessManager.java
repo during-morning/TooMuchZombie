@@ -73,7 +73,7 @@ public class AwarenessManager {
                 if (strongSignal && shouldSwitch && !lockedOnOther) {
                     agent.clearInvestigationTarget();
                     agent.setNoiseHint(sourcePlayer.getLocation(), 1400L, 0.45);
-                    agent.setTargetEntity(sourcePlayer);
+                    agent.setFocusTargetHint(sourcePlayer, 1400L);
                     agent.setTargetLocation(sourcePlayer.getLocation());
                     agent.lockPursuitOn(sourcePlayer, 3500L);
                     continue;

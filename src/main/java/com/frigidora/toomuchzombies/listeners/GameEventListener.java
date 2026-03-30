@@ -49,6 +49,7 @@ import com.frigidora.toomuchzombies.config.ConfigManager;
 import com.frigidora.toomuchzombies.enums.ZombieRole;
 import com.frigidora.toomuchzombies.mechanics.AwarenessManager;
 import com.frigidora.toomuchzombies.mechanics.BloodMoonManager;
+import com.frigidora.toomuchzombies.mechanics.DropCleanupManager;
 import com.frigidora.toomuchzombies.mechanics.LightSourceManager;
 import com.frigidora.toomuchzombies.mechanics.PlayerLevelManager;
 import com.frigidora.toomuchzombies.mechanics.ZombieFactory;
@@ -56,8 +57,11 @@ import com.frigidora.toomuchzombies.mechanics.ZombieFactory;
 public class GameEventListener implements Listener {
     private static final String STEALTH_CREEPER_MARK = "tmz_stealth_creeper";
     private static final String STEALTH_CREEPER_PDC_KEY = "tmz_stealth_creeper";
-    private static final int END_WORLD_ZOMBIE_CAP = 120;
-    private static final int END_NEARBY_ZOMBIE_CAP = 40;
+    private static final String STEALTH_CREEPER_SPAWN_MS_KEY = "tmz_stealth_creeper_spawn_ms";
+    private static final String STEALTH_CREEPER_REMOVE_SCHEDULED = "tmz_stealth_creeper_remove_scheduled";
+    private static final long STEALTH_CREEPER_PROTECTION_MS = 5000L;
+    private static final int END_WORLD_ZOMBIE_CAP = 220;
+    private static final int END_NEARBY_ZOMBIE_CAP = 96;
 
     private final HiveMindManager hiveMindManager = new HiveMindManager();
     private final AwarenessManager awarenessManager = AwarenessManager.getInstance();
@@ -65,6 +69,7 @@ public class GameEventListener implements Listener {
 
     public GameEventListener() {
         startGlobalStealthCreeperEnforcer();
+        startLowHealthAggroPulse();
     }
 
     @EventHandler
@@ -108,7 +113,10 @@ public class GameEventListener implements Listener {
                 }
             }
 
-            int globalLimit = BloodMoonManager.getInstance().isBloodMoon(loc.getWorld()) ? 1200 : 900;
+            int baseGlobal = ConfigManager.getInstance().getSpawnMaxGlobalZombies();
+            int globalLimit = BloodMoonManager.getInstance().isBloodMoon(loc.getWorld())
+                ? Math.max(baseGlobal, (int) Math.floor(baseGlobal * 1.30))
+                : Math.max(900, (int) Math.floor(baseGlobal * 0.92));
             if (ZombieAIManager.getInstance().getZombieCount() >= globalLimit) {
                 if (entity instanceof Zombie ||
                     entity instanceof AbstractSkeleton ||
@@ -122,7 +130,10 @@ public class GameEventListener implements Listener {
                 }
             }
 
-            int perPlayerLimit = BloodMoonManager.getInstance().isBloodMoon(loc.getWorld()) ? 92 : 72;
+            int basePerPlayer = ConfigManager.getInstance().getSpawnMaxNearPlayer();
+            int perPlayerLimit = BloodMoonManager.getInstance().isBloodMoon(loc.getWorld())
+                ? Math.max(basePerPlayer, (int) Math.floor(basePerPlayer * 1.20))
+                : Math.max(96, (int) Math.floor(basePerPlayer * 0.88));
 
             // 查找最近的玩家
             Player nearest = null;
@@ -136,14 +147,8 @@ public class GameEventListener implements Listener {
             }
 
             if (nearest != null && minDistSq < 96 * 96) { // 放宽到 96 格范围内的生成
-                int nearbyZombies = 0;
-                for (Entity e : nearest.getNearbyEntities(96, 96, 96)) {
-                    if (e instanceof Zombie) {
-                        nearbyZombies++;
-                    }
-                }
-
-                if (nearbyZombies >= perPlayerLimit) {
+                int nearbyManaged = countManagedZombiesNear(loc, 96.0);
+                if (nearbyManaged >= perPlayerLimit) {
                     event.setCancelled(true);
                     return;
                 }
@@ -151,7 +156,7 @@ public class GameEventListener implements Listener {
         }
 
         if (entity instanceof Creeper creeper) {
-            configureStealthCreeper(creeper);
+            configureStealthCreeper(creeper, true);
             return;
         }
 
@@ -172,8 +177,10 @@ public class GameEventListener implements Listener {
         if (!(event.getEntity() instanceof Creeper creeper)) {
             return;
         }
+        // 强制不进入充能态，避免电弧可见与状态抖动。
+        event.setCancelled(true);
         // 闪电苦力怕同样不转换，统一走隐身+禁自主移动逻辑。
-        configureStealthCreeper(creeper);
+        configureStealthCreeper(creeper, true);
     }
 
     private void spawnConvertedZombie(Location loc) {
@@ -193,7 +200,6 @@ public class GameEventListener implements Listener {
             return false;
         }
         return entity instanceof AbstractSkeleton
-            || entity instanceof Creeper
             || entity instanceof Spider
             || entity instanceof Enderman
             || entity instanceof Witch
@@ -212,7 +218,7 @@ public class GameEventListener implements Listener {
         return count;
     }
 
-    private void configureStealthCreeper(Creeper creeper) {
+    private void configureStealthCreeper(Creeper creeper, boolean scheduleReapply) {
         if (creeper == null || !creeper.isValid()) {
             return;
         }
@@ -220,16 +226,19 @@ public class GameEventListener implements Listener {
             creeper.setMetadata(STEALTH_CREEPER_MARK, new FixedMetadataValue(com.frigidora.toomuchzombies.TooMuchZombies.getInstance(), true));
         }
         markStealthCreeper(creeper);
+        scheduleStealthCreeperRemoval(creeper);
 
         // 保留苦力怕自爆逻辑，仅移除其自主移动能力。
         applyStealthCreeperState(creeper);
 
-        // 双保险：下一 tick 再应用一次，覆盖可能的后置初始化/属性回写。
-        org.bukkit.Bukkit.getScheduler().runTaskLater(
-            com.frigidora.toomuchzombies.TooMuchZombies.getInstance(),
-            () -> applyStealthCreeperState(creeper),
-            1L
-        );
+        if (scheduleReapply) {
+            // 双保险：下一 tick 再应用一次，覆盖可能的后置初始化/属性回写。
+            org.bukkit.Bukkit.getScheduler().runTaskLater(
+                com.frigidora.toomuchzombies.TooMuchZombies.getInstance(),
+                () -> applyStealthCreeperState(creeper),
+                1L
+            );
+        }
     }
 
     private void applyStealthCreeperState(Creeper creeper) {
@@ -237,15 +246,25 @@ public class GameEventListener implements Listener {
             return;
         }
         creeper.setInvisible(true);
-        creeper.addPotionEffect(new PotionEffect(PotionEffectType.INVISIBILITY, Integer.MAX_VALUE, 0, true, false, false), true);
+        creeper.setGlowing(false);
+        if (!creeper.hasPotionEffect(PotionEffectType.INVISIBILITY)) {
+            creeper.addPotionEffect(new PotionEffect(PotionEffectType.INVISIBILITY, Integer.MAX_VALUE, 1, true, false, false), true);
+        }
         if (creeper.getAttribute(Attribute.GENERIC_MOVEMENT_SPEED) != null) {
-            creeper.getAttribute(Attribute.GENERIC_MOVEMENT_SPEED).setBaseValue(0.0);
+            double current = creeper.getAttribute(Attribute.GENERIC_MOVEMENT_SPEED).getBaseValue();
+            if (Math.abs(current) > 1.0E-6) {
+                creeper.getAttribute(Attribute.GENERIC_MOVEMENT_SPEED).setBaseValue(0.0);
+            }
         }
     }
 
     private void markStealthCreeper(Creeper creeper) {
         NamespacedKey key = new NamespacedKey(com.frigidora.toomuchzombies.TooMuchZombies.getInstance(), STEALTH_CREEPER_PDC_KEY);
         creeper.getPersistentDataContainer().set(key, PersistentDataType.BYTE, (byte) 1);
+        NamespacedKey spawnMsKey = new NamespacedKey(com.frigidora.toomuchzombies.TooMuchZombies.getInstance(), STEALTH_CREEPER_SPAWN_MS_KEY);
+        if (!creeper.getPersistentDataContainer().has(spawnMsKey, PersistentDataType.LONG)) {
+            creeper.getPersistentDataContainer().set(spawnMsKey, PersistentDataType.LONG, System.currentTimeMillis());
+        }
     }
 
     private boolean isStealthCreeper(Creeper creeper) {
@@ -253,18 +272,74 @@ public class GameEventListener implements Listener {
         return creeper.getPersistentDataContainer().has(key, PersistentDataType.BYTE);
     }
 
+    private boolean isWithinStealthProtectionWindow(Creeper creeper) {
+        NamespacedKey spawnMsKey = new NamespacedKey(com.frigidora.toomuchzombies.TooMuchZombies.getInstance(), STEALTH_CREEPER_SPAWN_MS_KEY);
+        Long spawnMs = creeper.getPersistentDataContainer().get(spawnMsKey, PersistentDataType.LONG);
+        if (spawnMs == null) {
+            return false;
+        }
+        return System.currentTimeMillis() - spawnMs < STEALTH_CREEPER_PROTECTION_MS;
+    }
+
+    private void scheduleStealthCreeperRemoval(Creeper creeper) {
+        if (creeper.hasMetadata(STEALTH_CREEPER_REMOVE_SCHEDULED)) {
+            return;
+        }
+        creeper.setMetadata(
+            STEALTH_CREEPER_REMOVE_SCHEDULED,
+            new FixedMetadataValue(com.frigidora.toomuchzombies.TooMuchZombies.getInstance(), true)
+        );
+        org.bukkit.Bukkit.getScheduler().runTaskLater(
+            com.frigidora.toomuchzombies.TooMuchZombies.getInstance(),
+            () -> {
+                if (creeper == null || !creeper.isValid() || !isStealthCreeper(creeper)) {
+                    return;
+                }
+                if (isWithinStealthProtectionWindow(creeper)) {
+                    return;
+                }
+                creeper.remove();
+            },
+            STEALTH_CREEPER_PROTECTION_MS / 50L
+        );
+    }
+
     private void startGlobalStealthCreeperEnforcer() {
         org.bukkit.Bukkit.getScheduler().runTaskTimer(
             com.frigidora.toomuchzombies.TooMuchZombies.getInstance(),
             () -> {
                 for (World world : org.bukkit.Bukkit.getWorlds()) {
+                    if (world.getPlayers().isEmpty()) {
+                        continue;
+                    }
                     for (Entity entity : world.getEntitiesByClass(Creeper.class)) {
-                        configureStealthCreeper((Creeper) entity);
+                        Creeper creeper = (Creeper) entity;
+                        if (!isStealthCreeper(creeper)) {
+                            configureStealthCreeper(creeper, false);
+                        }
                     }
                 }
             },
             40L,
-            100L
+            400L
+        );
+    }
+
+    private void startLowHealthAggroPulse() {
+        org.bukkit.Bukkit.getScheduler().runTaskTimer(
+            com.frigidora.toomuchzombies.TooMuchZombies.getInstance(),
+            () -> {
+                for (Player player : org.bukkit.Bukkit.getOnlinePlayers()) {
+                    if (player.isDead() || player.getGameMode() == org.bukkit.GameMode.SPECTATOR) {
+                        continue;
+                    }
+                    if (player.getHealth() <= 8.0) {
+                        awarenessManager.alertNoise(player.getLocation(), 30.0, player);
+                    }
+                }
+            },
+            40L,
+            20L
         );
     }
 
@@ -303,6 +378,11 @@ public class GameEventListener implements Listener {
                 cause == DamageCause.HOT_FLOOR ||
                 cause == DamageCause.MAGIC) {
                 event.setDamage(event.getDamage() * 1.2);
+            }
+        } else if (event.getEntity() instanceof Player player) {
+            double remaining = Math.max(0.0, player.getHealth() - event.getFinalDamage());
+            if (remaining <= 8.0) {
+                awarenessManager.alertNoise(player.getLocation(), 30.0, player);
             }
         }
     }
@@ -344,6 +424,9 @@ public class GameEventListener implements Listener {
             Zombie zombie = (Zombie) event.getEntity();
             int level = getZombieLevel(zombie);
             addZombieDrops(event, zombie, level);
+            if (DropCleanupManager.getInstance() != null) {
+                DropCleanupManager.getInstance().tagZombieDrops(event);
+            }
 
             ZombieAIManager.getInstance().unregisterZombie(event.getEntity().getUniqueId());
         }

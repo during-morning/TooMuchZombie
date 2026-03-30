@@ -30,8 +30,15 @@ public class ZombieBehaviorGoal implements Goal<Zombie> {
     @Override
     public void tick() {
         if (agent != null && !agent.isAiPaused()) {
-            // 执行行为
-            ZombieAIManager.getInstance().executeBehavior(agent);
+            try {
+                ZombieAIManager.getInstance().executeBehavior(agent);
+            } catch (Throwable t) {
+                if (agent.checkAndResetSkillCooldown("AI_GOAL_ERR_LOG", 5000L)) {
+                    TooMuchZombies.getInstance().getLogger().warning(
+                        "ZombieBehaviorGoal tick failure for " + zombie.getUniqueId() + ": " + t.getClass().getSimpleName()
+                    );
+                }
+            }
         }
     }
 

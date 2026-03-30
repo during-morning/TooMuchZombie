@@ -38,6 +38,8 @@ public class ZombieBuilderBehavior {
     private long lastMoveTime = 0;
     private BlockFace preferredLateralDir = null;
     private long preferredLateralUntil = 0L;
+    private long buildActivatedAt = 0L;
+    private int buildAbortStrikes = 0;
 
     public ZombieBuilderBehavior(ZombieAgent agent, ZombieBreakerBehavior breaker) {
         this.agent = agent;
@@ -71,11 +73,14 @@ public class ZombieBuilderBehavior {
                 this.zombie.getPathfinder().stopPathfinding();
                 this.preferredLateralDir = null;
                 this.preferredLateralUntil = 0L;
+                this.buildActivatedAt = System.currentTimeMillis();
+                this.buildAbortStrikes = 0;
             } else {
                 breaker.stopBreaking();
                 planner.stop();
                 this.preferredLateralDir = null;
                 this.preferredLateralUntil = 0L;
+                this.buildActivatedAt = 0L;
             }
         }
     }
@@ -109,7 +114,10 @@ public class ZombieBuilderBehavior {
         Location targetLoc = agent.getLastKnownTargetLocation();
         if (targetLoc == null) {
             hitFailure("target_lost");
-            setActive(false);
+            // 对齐 ZombieGame 的“建造期承诺窗口”：刚进 build 时短时间不立即退出，避免来回切状态。
+            if (System.currentTimeMillis() - buildActivatedAt >= 2200L) {
+                setActive(false);
+            }
             return;
         }
 
@@ -118,10 +126,10 @@ public class ZombieBuilderBehavior {
         double distSq = zombie.getLocation().distanceSquared(centerLoc);
         
         // 如果距离目标位置太远，或者根本够不着下一个方块，先移动
-        if (distSq > 1.44) { 
+        if (distSq > 2.56) {
             safeMoveTo(centerLoc, 1.2);
             stuckTicks++;
-            if (stuckTicks > 60) {
+            if (stuckTicks > 120) {
                 hitFailure("off_center_timeout");
                 handleBuildFailure(zombie.getWorld().getBlockAt(selfPos.x, selfPos.y, selfPos.z));
                 stuckTicks = 0;
@@ -192,6 +200,7 @@ public class ZombieBuilderBehavior {
                 
                 if (result == PlacementResult.SUCCESS) {
                     stuckTicks = 0;
+                    buildAbortStrikes = Math.max(0, buildAbortStrikes - 1);
                 } else if (result == PlacementResult.TOO_FAR) {
                     hitFailure("place_too_far");
                     // 核心修复：如果够不着，计算一个能构着的位置并前往
@@ -225,12 +234,12 @@ public class ZombieBuilderBehavior {
         if (target == null) return;
         
         // 性能优化：避免每一 tick 都调用 moveTo
-        // 只有当目标位置发生显著变化，或者距离上次调用超过 1 秒，或者当前没有路径时，才调用 NMS 寻路
+        // 只有当目标位置发生显著变化，或者距离上次调用超过短窗，或者当前没有路径时，才调用 NMS 寻路
         if (lastMoveTarget != null && lastMoveTarget.getWorld().equals(target.getWorld())) {
             double distSq = target.distanceSquared(lastMoveTarget);
             long timeDiff = System.currentTimeMillis() - lastMoveTime;
             
-            if (distSq < 0.25 && timeDiff < 1000 && zombie.getPathfinder().hasPath()) {
+            if (distSq < 0.16 && timeDiff < 250 && zombie.getPathfinder().hasPath()) {
                 return;
             }
         }
@@ -241,6 +250,7 @@ public class ZombieBuilderBehavior {
     }
 
     private void handleBuildFailure(Block targetBlock) {
+        buildAbortStrikes++;
         // 意识到无法搭建，自动尝试“跳跃”或“瞬移”上去
         Location loc = targetBlock.getLocation().add(0.5, 0, 0.5);
         for (int i = 0; i < 4; i++) {
@@ -252,8 +262,18 @@ public class ZombieBuilderBehavior {
                 return;
             }
         }
+
+        // 前几次失败先“重试+绕行”，避免一失败就退出到追击模式导致乱跑。
+        if (buildAbortStrikes < 3) {
+            hitFailure("build_retry");
+            recoverFromPlacementFailure(targetBlock);
+            currentStructure = null;
+            return;
+        }
+
         hitFailure("build_abort");
         setActive(false);
+        buildAbortStrikes = 0;
     }
 
     private void updateStructure(Location target) {
@@ -336,17 +356,17 @@ public class ZombieBuilderBehavior {
                 dir = leftDist <= rightDist ? left : right;
                 foundPath = true;
                 preferredLateralDir = dir;
-                preferredLateralUntil = now + 1400L;
+                preferredLateralUntil = now + 2200L;
             } else if (leftWalkable) {
                 dir = left;
                 foundPath = true;
                 preferredLateralDir = left;
-                preferredLateralUntil = now + 1400L;
+                preferredLateralUntil = now + 2200L;
             } else if (rightWalkable) {
                 dir = right;
                 foundPath = true;
                 preferredLateralDir = right;
-                preferredLateralUntil = now + 1400L;
+                preferredLateralUntil = now + 2200L;
             }
             
             if (foundPath) {
@@ -525,7 +545,8 @@ public class ZombieBuilderBehavior {
         // 白天减速：速度减小 75% (冷却时间变为原来的 1 / 0.25 = 4 倍)
         long time = zombie.getWorld().getTime();
         if (time >= 0 && time < 12000) {
-            speedFactor *= 4.0;
+            // 白天仅轻微减速，避免“搭一格等很久”。
+            speedFactor *= 1.20;
         }
         
         cooldown = (long) (cooldown * speedFactor);
@@ -619,6 +640,21 @@ public class ZombieBuilderBehavior {
             if (!side.getType().isSolid() && sideDown.getType().isSolid()) {
                 safeMoveTo(side.getLocation().add(0.5, 0.0, 0.5), 1.25);
                 return;
+            }
+        }
+
+        // 找不到侧位时，退回到目标方向上的可站立点，保持“持续推进”。
+        Location target = agent.getLastKnownTargetLocation();
+        if (target != null && target.getWorld() != null && target.getWorld().equals(zombie.getWorld())) {
+            org.bukkit.util.Vector dir = target.toVector().subtract(zombie.getLocation().toVector()).setY(0);
+            if (dir.lengthSquared() > 0.04) {
+                dir.normalize().multiply(0.9);
+                Location fallback = zombie.getLocation().clone().add(dir);
+                Block feet = fallback.getBlock();
+                Block down = feet.getRelative(BlockFace.DOWN);
+                if (!feet.getType().isSolid() && down.getType().isSolid()) {
+                    safeMoveTo(fallback.add(0.5, 0.0, 0.5), 1.2);
+                }
             }
         }
     }

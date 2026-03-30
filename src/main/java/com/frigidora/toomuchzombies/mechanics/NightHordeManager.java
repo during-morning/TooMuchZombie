@@ -123,7 +123,7 @@ public class NightHordeManager {
     }
 
     private boolean isSpawnStandable(Location spawn) {
-        if (!spawn.getChunk().isLoaded()) {
+        if (!spawn.getWorld().isChunkLoaded(spawn.getBlockX() >> 4, spawn.getBlockZ() >> 4)) {
             return false;
         }
         if (!spawn.getBlock().isPassable() || !spawn.clone().add(0, 1, 0).getBlock().isPassable()) {
