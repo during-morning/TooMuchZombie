@@ -10,6 +10,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.LongAdder;
 
 import org.bukkit.Location;
 import org.bukkit.GameMode;
@@ -38,6 +39,7 @@ public class ZombieAIManager implements Listener {
     private final HiveMindManager hiveMindManager = new HiveMindManager();
     private final AbilityArbitrator abilityArbitrator = new AbilityArbitrator();
     private final Map<AbilityIntent, Integer> arbitrationHitStats = new ConcurrentHashMap<>();
+    private final Map<String, LongAdder> aiRuntimeStats = new ConcurrentHashMap<>();
     
     // 构建预留表：记录方块位置和预留时间戳
     private final Map<org.bukkit.Location, Long> reservedBuildSpots = new ConcurrentHashMap<>();
@@ -99,7 +101,7 @@ public class ZombieAIManager implements Listener {
     private record RemovalTicket(UUID uuid, long executeAtMs, String reason, RemovalPriority priority) {}
 
     private record PlayerSnapshot(UUID uuid, UUID worldId, double x, double y, double z, double health, double maxHealth, int foodLevel) {}
-    private record AgentSnapshot(UUID uuid, UUID worldId, double x, double y, double z, UUID currentTargetId) {}
+    private record AgentSnapshot(UUID uuid, UUID worldId, double x, double y, double z, UUID currentTargetId, UUID plannedTargetId) {}
     
     public java.util.Collection<ZombieAgent> getNearbyAgents(Location loc, double range) {
         // 使用 SpatialPartition 快速查找
@@ -476,6 +478,21 @@ public class ZombieAIManager implements Listener {
         return out;
     }
 
+    public void recordAiRuntimeStat(String key) {
+        if (key == null || key.isEmpty()) {
+            return;
+        }
+        aiRuntimeStats.computeIfAbsent(key, k -> new LongAdder()).increment();
+    }
+
+    public Map<String, Long> getAiRuntimeStatsSnapshot() {
+        Map<String, Long> out = new java.util.TreeMap<>();
+        for (Map.Entry<String, LongAdder> entry : aiRuntimeStats.entrySet()) {
+            out.put(entry.getKey(), entry.getValue().longValue());
+        }
+        return out;
+    }
+
     public Map<String, Integer> getBuilderFailureStats() {
         Map<String, Integer> out = new java.util.HashMap<>();
         for (ZombieAgent agent : agents.values()) {
@@ -503,6 +520,7 @@ public class ZombieAIManager implements Listener {
         breachRoleLeaseUntil.clear();
         breachRequests.clear();
         arbitrationHitStats.clear();
+        aiRuntimeStats.clear();
         for (ZombieAgent agent : agents.values()) {
             agent.getCooperationBehavior().resetNodeHitCounters();
             agent.getBuilderBehavior().resetFailureCounters();
@@ -574,8 +592,11 @@ public class ZombieAIManager implements Listener {
             }
             int configuredGlobal = ConfigManager.getInstance().getSpawnMaxGlobalZombies();
             int highLoadThreshold = Math.max(420, (int) Math.floor(configuredGlobal * 0.60));
-            boolean highLoad = currentCount >= highLoadThreshold || tps < 17.8;
+            boolean highLoad = currentCount >= highLoadThreshold || tps < ConfigManager.getInstance().getAsyncOverloadTpsThreshold();
             overloadMode = highLoad;
+            if (highLoad) {
+                recordAiRuntimeStat("overloadTicks");
+            }
             int asyncPlanConfig = ConfigManager.getInstance().getAsyncMaxPlansPerTick();
             replanBudgetRemaining = highLoad
                 ? Math.max(4, Math.min(24, asyncPlanConfig / 4))
@@ -796,13 +817,15 @@ public class ZombieAIManager implements Listener {
                 continue;
             }
             LivingEntity current = agent.getTargetEntity();
+            UUID planned = plannedTargets.get(agent.getUuid());
             allSnapshots.add(new AgentSnapshot(
                 agent.getUuid(),
                 zombie.getWorld().getUID(),
                 zombie.getLocation().getX(),
                 zombie.getLocation().getY(),
                 zombie.getLocation().getZ(),
-                current != null ? current.getUniqueId() : null));
+                current != null ? current.getUniqueId() : null,
+                planned));
         }
 
         if (allSnapshots.isEmpty()) {
@@ -851,18 +874,18 @@ public class ZombieAIManager implements Listener {
                         if (distSq > rangeSq || Math.abs(dy) > 22.0) {
                             continue;
                         }
-                        double score;
-                        if (simplifiedMode) {
-                            double stickiness = player.uuid().equals(agent.currentTargetId()) ? 0.22 : 0.0;
-                            score = (1.0 / Math.max(1.0, Math.sqrt(distSq))) + stickiness;
-                        } else {
-                            double distanceScore = cfg.getTargetingPlayerPositionWeight() * (1.0 / Math.max(1.0, Math.sqrt(distSq)));
-                            double healthScore = 1.0 - Math.max(0.0, Math.min(1.0, player.health() / Math.max(1.0, player.maxHealth())));
-                            double hungerScore = (1.0 - Math.max(0.0, Math.min(1.0, player.foodLevel() / 20.0))) * 0.35;
-                            double stickiness = player.uuid().equals(agent.currentTargetId()) ? 0.18 : 0.0;
-                            double verticalPenalty = Math.min(0.40, Math.abs(dy) * 0.02);
-                            score = distanceScore + healthScore * 0.35 + hungerScore + stickiness - verticalPenalty;
-                        }
+                        boolean isCurrentTarget = player.uuid().equals(agent.currentTargetId());
+                        boolean isPlannedTarget = player.uuid().equals(agent.plannedTargetId());
+                        double score = targetCoordinator.evaluateSnapshotScore(
+                            distSq,
+                            player.health(),
+                            player.maxHealth(),
+                            player.foodLevel(),
+                            isCurrentTarget,
+                            isPlannedTarget,
+                            Math.abs(dy),
+                            simplifiedMode
+                        );
                         if (score > bestScore) {
                             bestScore = score;
                             best = player;

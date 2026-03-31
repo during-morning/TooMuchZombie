@@ -106,8 +106,10 @@ public class ZACommand implements CommandExecutor {
             int zombies = ZombieAIManager.getInstance().getZombieCount();
             int tempBlocks = TemporaryBlockManager.getInstance() != null ? TemporaryBlockManager.getInstance().getTemporaryBlockCount() : 0;
             int expiringSoon = TemporaryBlockManager.getInstance() != null ? TemporaryBlockManager.getInstance().getExpiringSoonCount(15000) : 0;
+            boolean overload = ZombieAIManager.getInstance().isOverloadMode();
             sender.sendMessage("§6=== System Debug ===");
             sender.sendMessage("§7zombies: §f" + zombies + " §7tempBlocks: §f" + tempBlocks + " §7expiring<15s: §f" + expiringSoon);
+            sender.sendMessage("§7overloadMode: §f" + overload);
             sender.sendMessage("§7spawnRejects: §f" + ZombieFactory.getSpawnRejectStatsLine());
             return;
         }
@@ -118,6 +120,7 @@ public class ZACommand implements CommandExecutor {
             java.util.Map<com.frigidora.toomuchzombies.ai.AbilityIntent, Integer> intentHits = ZombieAIManager.getInstance().getArbitrationHitStats();
             java.util.Map<String, Integer> buildFailStats = ZombieAIManager.getInstance().getBuilderFailureStats();
             java.util.Map<String, Integer> breakerRejectStats = ZombieAIManager.getInstance().getBreakerRejectStats();
+            java.util.Map<String, Long> runtimeStats = ZombieAIManager.getInstance().getAiRuntimeStatsSnapshot();
             int p = roleStats.getOrDefault(BreachAssignmentRole.PRIMARY, 0);
             int s = roleStats.getOrDefault(BreachAssignmentRole.SUPPORT, 0);
             int b = roleStats.getOrDefault(BreachAssignmentRole.BODYGUARD, 0);
@@ -128,6 +131,7 @@ public class ZACommand implements CommandExecutor {
             sender.sendMessage("§7abilityIntents: §f" + intentHits);
             sender.sendMessage("§7builderFailures: §f" + buildFailStats);
             sender.sendMessage("§7breakerRejects: §f" + breakerRejectStats);
+            sender.sendMessage("§7runtimeStats: §f" + runtimeStats);
             return;
         }
 

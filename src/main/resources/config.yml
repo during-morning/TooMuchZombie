@@ -15,6 +15,9 @@ zombie-ai:
   terrain-modification-enabled: true
   targeting:
     scan-cooldown-ms: 260
+    target-lease-ms: 2400
+    lease-break-score-bonus: 0.28
+    switch-distance-advantage: 3.5
     switch-score-delta: 0.22
     max-range: 52.0
     recognition-range: 28.0
@@ -35,6 +38,7 @@ zombie-ai:
   async:
     max-plans-per-tick: 48
     plan-time-budget-ms: 3
+    overload-tps-threshold: 17.8
   recovery:
     repath-cooldown-ms: 700
     stuck-warning-ticks: 35
@@ -63,6 +67,8 @@ zombie-ai:
     formation-replan-threshold: 1.2
     separation-weight: 0.6
     separation-range: 2.2
+    lane-lock-ms: 2200
+    strafe-reverse-failure-threshold: 3
 
   builder:
     place-cooldown-ms: 620
@@ -105,18 +111,22 @@ zombie-roles:
   suicide: 0.05
 
 spawn:
-  max-zombies-per-chunk: 14
+  max-zombies-per-chunk: 18
   mspt-threshold: 45
   algorithm:
     enabled: true
-    chunk-cooldown-ms: 320
-    max-global-zombies: 720
-    max-near-player: 96
-    spawn-budget-per-player: 7
+    chunk-cooldown-ms: 180
+    max-global-zombies: 1080
+    max-near-player: 144
+    spawn-budget-per-player: 11
     max-y-diff: 18
     vertical-search-range: 8
     accept-chance: 1.0
     enforce-night-only: false
+    tps-soft-threshold: 18.7
+    tps-hard-threshold: 17.2
+    tps-budget-soft-scale: 0.78
+    tps-budget-hard-scale: 0.45
 
 level:
   max: 12

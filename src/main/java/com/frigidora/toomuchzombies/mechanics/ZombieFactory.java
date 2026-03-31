@@ -9,6 +9,7 @@ import java.util.Random;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.LongAdder;
 
+import org.bukkit.Bukkit;
 import org.bukkit.Chunk;
 import org.bukkit.Location;
 import org.bukkit.Material;
@@ -100,9 +101,38 @@ public class ZombieFactory {
         return chunk.getWorld().getUID() + ":" + chunk.getX() + ":" + chunk.getZ();
     }
 
+    private static double readCurrentTps() {
+        try {
+            double[] tps = Bukkit.getTPS();
+            if (tps != null && tps.length > 0) {
+                return Math.max(0.0, tps[0]);
+            }
+        } catch (Throwable ignored) {
+        }
+        return 20.0;
+    }
+
+    private static double computeTpsSpawnScale(ConfigManager cfg) {
+        double tps = readCurrentTps();
+        double soft = cfg.getSpawnTpsSoftThreshold();
+        double hard = Math.min(soft - 0.1, cfg.getSpawnTpsHardThreshold());
+        double softScale = cfg.getSpawnTpsBudgetSoftScale();
+        double hardScale = Math.min(softScale, cfg.getSpawnTpsBudgetHardScale());
+
+        if (tps >= soft) {
+            return 1.0;
+        }
+        if (tps <= hard) {
+            return hardScale;
+        }
+        double ratio = (tps - hard) / Math.max(0.1, (soft - hard));
+        return hardScale + (softScale - hardScale) * ratio;
+    }
+
     public static boolean evaluateSpawnPipeline(Location loc, EntityType entityType) {
         ConfigManager cfg = ConfigManager.getInstance();
         if (!cfg.isSpawnAlgorithmEnabled()) return true;
+        double spawnScale = computeTpsSpawnScale(cfg);
 
         if (entityType != EntityType.ZOMBIE
             && entityType != EntityType.DROWNED
@@ -124,7 +154,8 @@ public class ZombieFactory {
             }
         }
 
-        if (ZombieAIManager.getInstance().getZombieCount() >= cfg.getSpawnMaxGlobalZombies()) {
+        int effectiveGlobalCap = Math.max(24, (int) Math.floor(cfg.getSpawnMaxGlobalZombies() * Math.max(0.60, spawnScale)));
+        if (ZombieAIManager.getInstance().getZombieCount() >= effectiveGlobalCap) {
             reject("global_cap");
             return false;
         }
@@ -175,13 +206,15 @@ public class ZombieFactory {
         }
 
         // 只用插件管理僵尸参与配额判定，避免被原版自然僵尸误伤配额。
-        if (nearbyManaged >= cfg.getSpawnMaxNearPlayer()) {
+        int effectiveNearCap = Math.max(8, (int) Math.floor(cfg.getSpawnMaxNearPlayer() * Math.max(0.55, spawnScale)));
+        if (nearbyManaged >= effectiveNearCap) {
             reject("near_player_cap");
             return false;
         }
 
         // 预算按“每个玩家附近”判定，不再乘以世界人数，避免单玩家场景被过早限制。
         int relaxedBudget = Math.max(1, cfg.getSpawnBudgetPerPlayer()) * 8;
+        relaxedBudget = Math.max(4, (int) Math.floor(relaxedBudget * Math.max(0.45, spawnScale)));
         if (nearbyManaged >= relaxedBudget) {
             reject("budget");
             return false;
@@ -191,6 +224,7 @@ public class ZombieFactory {
         long now = System.currentTimeMillis();
         Long last = chunkCooldowns.get(key);
         long cooldownMs = Math.max(0L, cfg.getSpawnChunkCooldownMs() / 3L);
+        cooldownMs = (long) Math.ceil(cooldownMs / Math.max(0.18, spawnScale));
         if (last != null && now - last < cooldownMs) {
             // 冷却后半段允许少量提前通过，降低“刷怪节奏过慢”的体感。
             if (now - last < cooldownMs / 3L || RANDOM.nextDouble() < 0.35) {
@@ -199,7 +233,13 @@ public class ZombieFactory {
             }
         }
 
-        double effectiveAcceptChance = Math.max(cfg.getSpawnAcceptChance(), 0.96);
+        if (spawnScale < 0.999 && RANDOM.nextDouble() > spawnScale) {
+            reject("tps_throttle");
+            return false;
+        }
+
+        double effectiveAcceptChance = Math.max(cfg.getSpawnAcceptChance(), 0.96) * (0.72 + 0.28 * spawnScale);
+        effectiveAcceptChance = Math.max(0.30, Math.min(1.0, effectiveAcceptChance));
         if (RANDOM.nextDouble() > effectiveAcceptChance) {
             reject("accept_rate");
             return false;
@@ -216,7 +256,9 @@ public class ZombieFactory {
         }
 
         ConfigManager cfg = ConfigManager.getInstance();
-        if (ZombieAIManager.getInstance().getZombieCount() >= cfg.getSpawnMaxGlobalZombies()) {
+        double spawnScale = computeTpsSpawnScale(cfg);
+        int effectiveGlobalCap = Math.max(24, (int) Math.floor(cfg.getSpawnMaxGlobalZombies() * Math.max(0.60, spawnScale)));
+        if (ZombieAIManager.getInstance().getZombieCount() >= effectiveGlobalCap) {
             reject("global_cap_custom");
             return false;
         }
@@ -248,12 +290,14 @@ public class ZombieFactory {
             }
         }
 
-        if (nearbyManaged >= cfg.getSpawnMaxNearPlayer()) {
+        int effectiveNearCap = Math.max(8, (int) Math.floor(cfg.getSpawnMaxNearPlayer() * Math.max(0.55, spawnScale)));
+        if (nearbyManaged >= effectiveNearCap) {
             reject("near_player_cap_custom");
             return false;
         }
 
         int relaxedBudget = Math.max(1, cfg.getSpawnBudgetPerPlayer()) * 8;
+        relaxedBudget = Math.max(4, (int) Math.floor(relaxedBudget * Math.max(0.45, spawnScale)));
         if (nearbyManaged >= relaxedBudget) {
             reject("budget_custom");
             return false;

@@ -45,6 +45,7 @@ public class TargetCoordinator {
         LivingEntity current = resolveCurrentTarget(agent, zombie, whitelist, blacklist);
         if (current != null) {
             agent.lockPursuitOn(current, 1200L);
+            agent.markTargetSeenNow();
         }
 
         UUID currentTargetId = current != null ? current.getUniqueId() : null;
@@ -63,6 +64,7 @@ public class TargetCoordinator {
             if ((distSq <= holdRangeSq && (zombie.hasLineOfSight(current) || recentlySeen))
                 || agent.isPursuitLockedOn(current.getUniqueId())) {
                 agent.lockPursuitOn(current, 2600L);
+                agent.leaseTarget(cfg.getTargetingTargetLeaseMs());
                 agent.setLastKnownTargetLocation(current.getLocation());
                 return;
             }
@@ -84,44 +86,29 @@ public class TargetCoordinator {
         }
 
         if (best == null) {
+            if (current != null && !agent.hasMemoryExpired(cfg.getRoutingLastKnownMemoryMs())) {
+                agent.lockPursuitOn(current, 1200L);
+                agent.leaseTarget(cfg.getTargetingTargetLeaseMs());
+                agent.setLastKnownTargetLocation(current.getLocation());
+                return;
+            }
             if (plannedId != null) {
                 org.bukkit.entity.Entity plannedEntity = org.bukkit.Bukkit.getEntity(plannedId);
                 if (plannedEntity instanceof LivingEntity living
                     && isViableTarget(living, zombie, whitelist, blacklist)) {
-                    commitTarget(agent, living);
+                    double plannedScore = evaluateTargetScore(agent, zombie, living, currentTargetId, plannedId, focusHint, protectHint);
+                    if (canSwitchTarget(agent, zombie, current, living, currentScore, plannedScore)) {
+                        commitTarget(agent, living, currentTargetId);
+                    }
                     return;
                 }
             }
             return;
         }
-
-        double delta = Math.max(cfg.getTargetingSwitchScoreDelta(), cfg.getTargetingSwitchHysteresis());
-        if (current != null && !best.equals(current) && bestScore < currentScore + delta) {
+        if (!canSwitchTarget(agent, zombie, current, best, currentScore, bestScore)) {
             return;
         }
-
-        if (current != null && !best.equals(current)) {
-            if (zombie.hasLineOfSight(current)
-                && zombie.getLocation().distanceSquared(current.getLocation()) <= 16.0 * 16.0) {
-                return;
-            }
-            if (agent.isPursuitLockedOn(current.getUniqueId())) {
-                return;
-            }
-
-            double currentDistSq = zombie.getLocation().distanceSquared(current.getLocation());
-            double bestDistSq = zombie.getLocation().distanceSquared(best.getLocation());
-            if (bestDistSq >= currentDistSq - 4.0) {
-                return;
-            }
-
-            boolean inClosePressure = currentDistSq <= 20.0 * 20.0;
-            if (inClosePressure && !agent.canCommitTargetSwitch(best.getUniqueId(), 1600L)) {
-                return;
-            }
-        }
-
-        commitTarget(agent, best);
+        commitTarget(agent, best, currentTargetId);
     }
 
     private LivingEntity resolveCurrentTarget(ZombieAgent agent, Zombie zombie, Set<EntityType> whitelist, Set<EntityType> blacklist) {
@@ -229,7 +216,61 @@ public class TargetCoordinator {
         return whitelist.contains(target.getType());
     }
 
-    private void commitTarget(ZombieAgent agent, LivingEntity best) {
+    private boolean canSwitchTarget(
+        ZombieAgent agent,
+        Zombie zombie,
+        LivingEntity current,
+        LivingEntity candidate,
+        double currentScore,
+        double candidateScore
+    ) {
+        if (candidate == null || !candidate.isValid()) {
+            return false;
+        }
+        if (current == null || !current.isValid()) {
+            return true;
+        }
+        if (current.getUniqueId().equals(candidate.getUniqueId())) {
+            return true;
+        }
+
+        ConfigManager cfg = ConfigManager.getInstance();
+        double delta = Math.max(cfg.getTargetingSwitchScoreDelta(), cfg.getTargetingSwitchHysteresis());
+        double required = currentScore + delta;
+        if (agent.isTargetLeaseActive()) {
+            required += cfg.getTargetingLeaseBreakScoreBonus();
+        }
+
+        if (candidateScore < required) {
+            return false;
+        }
+
+        double currentDistSq = zombie.getLocation().distanceSquared(current.getLocation());
+        double bestDistSq = zombie.getLocation().distanceSquared(candidate.getLocation());
+        double advantage = cfg.getTargetingSwitchDistanceAdvantage();
+        double requiredDistGain = advantage * advantage;
+        if (agent.isTargetLeaseActive()) {
+            requiredDistGain *= 1.35;
+        }
+        if (bestDistSq > currentDistSq - requiredDistGain) {
+            return false;
+        }
+
+        if (zombie.hasLineOfSight(current) && currentDistSq <= 16.0 * 16.0) {
+            return false;
+        }
+        if (agent.isPursuitLockedOn(current.getUniqueId())) {
+            return false;
+        }
+
+        boolean inClosePressure = currentDistSq <= 20.0 * 20.0;
+        if (inClosePressure && !agent.canCommitTargetSwitch(candidate.getUniqueId(), 1600L)) {
+            return false;
+        }
+        return true;
+    }
+
+    private void commitTarget(ZombieAgent agent, LivingEntity best, UUID previousTargetId) {
         Zombie zombie = agent.getZombie();
         if (zombie == null || !zombie.isValid() || best == null || !best.isValid()) {
             return;
@@ -239,7 +280,44 @@ public class TargetCoordinator {
         agent.setTargetEntity(best);
         agent.markTargetCommitted(best);
         agent.lockPursuitOn(best, 4200L);
+        agent.leaseTarget(ConfigManager.getInstance().getTargetingTargetLeaseMs());
         agent.setLastKnownTargetLocation(best.getLocation());
+        if (previousTargetId != null && !previousTargetId.equals(best.getUniqueId())) {
+            manager.recordAiRuntimeStat("targetSwitches");
+        }
+    }
+
+    public double evaluateSnapshotScore(
+        double distSq,
+        double health,
+        double maxHealth,
+        int foodLevel,
+        boolean isCurrentTarget,
+        boolean isPlannedTarget,
+        double verticalDelta,
+        boolean simplified
+    ) {
+        double distance = Math.max(1.0, Math.sqrt(Math.max(0.0, distSq)));
+        if (simplified) {
+            double stickiness = isCurrentTarget ? 0.22 : 0.0;
+            return (1.0 / distance) + stickiness + (isPlannedTarget ? 0.06 : 0.0);
+        }
+
+        ConfigManager cfg = ConfigManager.getInstance();
+        double positionWeight = cfg.getTargetingPlayerPositionWeight();
+        double distanceScore = positionWeight * (1.0 / distance);
+        double healthRatio = Math.max(0.0, Math.min(1.0, health / Math.max(1.0, maxHealth)));
+        double healthScore = 1.0 - healthRatio;
+        double hungerScore = (1.0 - Math.max(0.0, Math.min(1.0, foodLevel / 20.0))) * 0.45;
+        double currentBonus = isCurrentTarget ? 0.34 : 0.0;
+        double planningBonus = isPlannedTarget ? 0.10 : 0.0;
+        double verticalPenalty = Math.min(0.40, Math.abs(verticalDelta) * 0.03);
+        return distanceScore
+            + healthScore * 0.35
+            + hungerScore
+            + currentBonus
+            + planningBonus
+            - verticalPenalty;
     }
 
     private double evaluateTargetScore(
@@ -257,19 +335,25 @@ public class TargetCoordinator {
 
         ConfigManager cfg = ConfigManager.getInstance();
         double distSq = zombie.getLocation().distanceSquared(target.getLocation());
-        double distance = Math.max(1.0, Math.sqrt(distSq));
-        double positionWeight = cfg.getTargetingPlayerPositionWeight();
-        double noiseWeight = Math.min(positionWeight * 0.45, cfg.getTargetingNoiseSourceWeight());
-        double distanceScore = positionWeight * (1.0 / distance);
-
         double maxHealth = target.getAttribute(org.bukkit.attribute.Attribute.GENERIC_MAX_HEALTH) != null
             ? target.getAttribute(org.bukkit.attribute.Attribute.GENERIC_MAX_HEALTH).getValue()
             : 20.0;
-        double healthScore = 1.0 - Math.max(0.0, Math.min(1.0, target.getHealth() / Math.max(1.0, maxHealth)));
+        double positionWeight = cfg.getTargetingPlayerPositionWeight();
+        double noiseWeight = Math.min(positionWeight * 0.45, cfg.getTargetingNoiseSourceWeight());
+
+        double base = evaluateSnapshotScore(
+            distSq,
+            target.getHealth(),
+            maxHealth,
+            target instanceof Player p ? p.getFoodLevel() : 20,
+            currentTargetId != null && currentTargetId.equals(target.getUniqueId()),
+            plannedId != null && plannedId.equals(target.getUniqueId()),
+            target.getLocation().getY() - zombie.getLocation().getY(),
+            false
+        );
 
         boolean lineOfSight = zombie.hasLineOfSight(target);
         double lineOfSightBonus = lineOfSight ? 0.42 : 0.0;
-        double verticalPenalty = Math.min(0.38, Math.abs(target.getLocation().getY() - zombie.getLocation().getY()) * 0.03);
 
         Location noiseHint = agent.getNoiseHintLocation();
         double noiseScore = 0.0;
@@ -278,24 +362,15 @@ public class TargetCoordinator {
             noiseScore = noiseWeight * agent.getNoiseHintStrength() * (1.0 / hintDist);
         }
 
-        int foodLevel = target instanceof Player player ? player.getFoodLevel() : 20;
-        double hungerScore = target instanceof Player ? (1.0 - Math.max(0.0, Math.min(1.0, foodLevel / 20.0))) * 0.45 : 0.0;
-        double currentBonus = currentTargetId != null && currentTargetId.equals(target.getUniqueId()) ? 0.34 : 0.0;
-        double planningBonus = plannedId != null && plannedId.equals(target.getUniqueId()) ? 0.10 : 0.0;
         double focusBonus = focusHint != null && focusHint.getUniqueId().equals(target.getUniqueId()) ? 0.20 : 0.0;
         double protectBonus = protectHint != null && protectHint.getUniqueId().equals(target.getUniqueId()) ? 0.18 : 0.0;
         double pursuitBonus = agent.isPursuitLockedOn(target.getUniqueId()) ? 0.24 : 0.0;
 
-        return distanceScore
-            + healthScore * 0.35
-            + hungerScore
+        return base
             + lineOfSightBonus
             + noiseScore
-            + currentBonus
-            + planningBonus
             + focusBonus
             + protectBonus
-            + pursuitBonus
-            - verticalPenalty;
+            + pursuitBonus;
     }
 }

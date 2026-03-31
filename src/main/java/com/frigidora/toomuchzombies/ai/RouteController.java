@@ -80,11 +80,32 @@ public class RouteController {
         if (agent == null || nextAnchor == null) {
             return false;
         }
-        long minIntervalMs = computeReplanIntervalMs(distanceSq);
-        if (!agent.canReplanPath(minIntervalMs, nextAnchor, thresholdSq)) {
+        long now = System.currentTimeMillis();
+        boolean closeFreeze = agent.getMovementIntent() == ZombieAgent.MovementIntent.CLOSE
+            && now < agent.getMovementIntentLeaseUntil();
+        if (closeFreeze) {
             return false;
         }
-        return manager.tryConsumeReplanBudget();
+
+        ZombieAgent.PathFailureType failure = agent.getCurrentPathFailure();
+        boolean hardFailure = failure == ZombieAgent.PathFailureType.PATH_MISSING || failure == ZombieAgent.PathFailureType.HARD_STUCK;
+        boolean leaseExpired = now > agent.getPathModeLeaseUntil();
+        Location currentAnchor = agent.getPathAnchor();
+        boolean anchorDrift = currentAnchor == null
+            || currentAnchor.getWorld() == null
+            || nextAnchor.getWorld() == null
+            || !currentAnchor.getWorld().equals(nextAnchor.getWorld())
+            || currentAnchor.distanceSquared(nextAnchor) >= Math.max(1.0, thresholdSq * 2.0);
+
+        long minIntervalMs = computeReplanIntervalMs(distanceSq);
+        if (!hardFailure && !leaseExpired && !anchorDrift && !agent.canReplanPath(minIntervalMs, nextAnchor, thresholdSq)) {
+            return false;
+        }
+        if (!manager.tryConsumeReplanBudget()) {
+            return false;
+        }
+        manager.recordAiRuntimeStat("replans");
+        return true;
     }
 
     public long computeReplanIntervalMs(double distanceSq) {
@@ -99,6 +120,20 @@ public class RouteController {
         if (agent == null) {
             return;
         }
+        long now = System.currentTimeMillis();
+        RouteState currentState = mapCurrentState(agent.getMovementIntent());
+        boolean forceTransition = state == RouteState.RECOVER
+            || state == RouteState.CLOSE
+            || intent == ZombieAgent.PathIntent.EVADE_BEACON
+            || intent == ZombieAgent.PathIntent.EVADE_LIGHT;
+        if (!forceTransition
+            && currentState != null
+            && currentState != state
+            && now < agent.getMovementIntentLeaseUntil()
+            && !isTransitionAllowed(currentState, state)) {
+            return;
+        }
+
         if (intent != null) {
             agent.setPathIntent(intent, anchor, leaseMs);
         }
@@ -111,5 +146,31 @@ public class RouteController {
             case RECOVER -> ZombieAgent.MovementIntent.RECOVER;
         };
         agent.setMovementIntent(moveIntent, leaseMs);
+    }
+
+    private RouteState mapCurrentState(ZombieAgent.MovementIntent intent) {
+        if (intent == null) {
+            return null;
+        }
+        return switch (intent) {
+            case LOCK_PURSUIT -> RouteState.LOCK_PURSUIT;
+            case CORRIDOR -> RouteState.CORRIDOR;
+            case BREACH -> RouteState.BREACH;
+            case CLOSE -> RouteState.CLOSE;
+            case RECOVER, EVADE_BEACON, EVADE_LIGHT, IDLE -> RouteState.RECOVER;
+        };
+    }
+
+    private boolean isTransitionAllowed(RouteState from, RouteState to) {
+        if (from == null || to == null || from == to) {
+            return true;
+        }
+        return switch (from) {
+            case LOCK_PURSUIT -> to == RouteState.CORRIDOR || to == RouteState.CLOSE || to == RouteState.RECOVER;
+            case CORRIDOR -> to == RouteState.LOCK_PURSUIT || to == RouteState.BREACH || to == RouteState.CLOSE || to == RouteState.RECOVER;
+            case BREACH -> to == RouteState.CORRIDOR || to == RouteState.CLOSE || to == RouteState.RECOVER;
+            case CLOSE -> to == RouteState.LOCK_PURSUIT || to == RouteState.RECOVER;
+            case RECOVER -> to == RouteState.LOCK_PURSUIT || to == RouteState.CORRIDOR || to == RouteState.CLOSE;
+        };
     }
 }

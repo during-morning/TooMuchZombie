@@ -82,7 +82,7 @@ public class ZombieAgent {
     private int level = 1;
     private Location lastKnownTargetLocation;
     private WeakReference<LivingEntity> targetEntityRef;
-    private long lastSeenTargetTime;
+    private long lastSeenTargetAt;
     private boolean isFlanking;
     private Location investigationTarget;
     private long investigationExpiry;
@@ -95,6 +95,7 @@ public class ZombieAgent {
     private long protectTargetHintExpiry;
     private long pursuitLockUntil;
     private UUID pursuitTargetUuid;
+    private long targetLeaseUntil = 0L;
     private long lastTargetCommitAt = 0L;
     private UUID lastCommittedTargetUuid;
     
@@ -141,6 +142,9 @@ public class ZombieAgent {
     private long movementIntentLeaseUntil = 0L;
     private int lateralBias = 0;
     private long lateralBiasUntil = 0L;
+    private int strafeLockDirection = 0;
+    private long laneLockUntil = 0L;
+    private int replanFailStreak = 0;
     private PendingMove pendingMove;
 
     // 新 AI 行为
@@ -243,7 +247,7 @@ public class ZombieAgent {
 
     public void setLastKnownTargetLocation(Location lastKnownTargetLocation) {
         this.lastKnownTargetLocation = lastKnownTargetLocation == null ? null : lastKnownTargetLocation.clone();
-        this.lastSeenTargetTime = System.currentTimeMillis();
+        this.lastSeenTargetAt = System.currentTimeMillis();
     }
     
     public void setTargetEntity(LivingEntity target) {
@@ -258,7 +262,7 @@ public class ZombieAgent {
     }
     
     public boolean hasMemoryExpired(long durationMillis) {
-        return System.currentTimeMillis() - lastSeenTargetTime > durationMillis;
+        return System.currentTimeMillis() - lastSeenTargetAt > durationMillis;
     }
 
     public boolean isFlanking() {
@@ -357,6 +361,26 @@ public class ZombieAgent {
         this.pursuitLockUntil = Math.max(this.pursuitLockUntil, System.currentTimeMillis() + Math.max(250L, ttlMs));
     }
 
+    public void leaseTarget(long ttlMs) {
+        targetLeaseUntil = Math.max(targetLeaseUntil, System.currentTimeMillis() + Math.max(250L, ttlMs));
+    }
+
+    public boolean isTargetLeaseActive() {
+        return System.currentTimeMillis() <= targetLeaseUntil;
+    }
+
+    public long getTargetLeaseUntil() {
+        return targetLeaseUntil;
+    }
+
+    public long getLastSeenTargetAt() {
+        return lastSeenTargetAt;
+    }
+
+    public void markTargetSeenNow() {
+        this.lastSeenTargetAt = System.currentTimeMillis();
+    }
+
     public boolean isPursuitLocked() {
         return System.currentTimeMillis() <= pursuitLockUntil;
     }
@@ -451,6 +475,10 @@ public class ZombieAgent {
             lateralBias = 0;
             lateralBiasUntil = 0L;
         }
+        if (laneLockUntil > 0L && now > laneLockUntil) {
+            strafeLockDirection = 0;
+            laneLockUntil = 0L;
+        }
         if (movementIntentLeaseUntil > 0L && now > movementIntentLeaseUntil) {
             movementIntent = MovementIntent.IDLE;
             movementIntentLeaseUntil = 0L;
@@ -496,6 +524,9 @@ public class ZombieAgent {
 
         if (com.frigidora.toomuchzombies.TooMuchZombies.getNMSHandler() != null) {
             double effectiveSpeed = speed * getEnvironmentalSpeedMultiplier();
+            if (movementIntent == MovementIntent.CLOSE && effectiveSpeed < 0.72) {
+                effectiveSpeed = 0.72;
+            }
             com.frigidora.toomuchzombies.TooMuchZombies.getNMSHandler().moveTo(zombie, loc, effectiveSpeed);
             lastMoveCommandLocation = loc.clone();
             lastMoveCommandAt = now;
@@ -596,6 +627,7 @@ public class ZombieAgent {
         this.pathAnchor = anchor == null ? null : anchor.clone();
         this.pathModeLeaseUntil = System.currentTimeMillis() + Math.max(0L, leaseMs);
         this.lastReplanAt = System.currentTimeMillis();
+        replanFailStreak = Math.max(0, replanFailStreak - 1);
     }
 
     public boolean isPathIntentLeased(PathIntent intent) {
@@ -617,6 +649,10 @@ public class ZombieAgent {
 
     public boolean isMovementIntentLeased(MovementIntent intent) {
         return this.movementIntent == intent && System.currentTimeMillis() <= movementIntentLeaseUntil;
+    }
+
+    public long getMovementIntentLeaseUntil() {
+        return movementIntentLeaseUntil;
     }
 
     public Location getPathAnchor() {
@@ -648,6 +684,8 @@ public class ZombieAgent {
     public void lockLateralBias(int bias, long ttlMs) {
         this.lateralBias = Integer.compare(bias, 0);
         this.lateralBiasUntil = this.lateralBias == 0 ? 0L : System.currentTimeMillis() + Math.max(250L, ttlMs);
+        this.strafeLockDirection = this.lateralBias;
+        this.laneLockUntil = this.strafeLockDirection == 0 ? 0L : System.currentTimeMillis() + Math.max(250L, ttlMs);
     }
 
     public int getLateralBias() {
@@ -658,6 +696,39 @@ public class ZombieAgent {
         return lateralBias;
     }
 
+    public void lockStrafeDirection(int direction, long ttlMs) {
+        this.strafeLockDirection = Integer.compare(direction, 0);
+        this.laneLockUntil = this.strafeLockDirection == 0 ? 0L : System.currentTimeMillis() + Math.max(250L, ttlMs);
+        lockLateralBias(strafeLockDirection, ttlMs);
+    }
+
+    public int getStrafeLockDirection() {
+        if (laneLockUntil > 0L && System.currentTimeMillis() > laneLockUntil) {
+            strafeLockDirection = 0;
+            laneLockUntil = 0L;
+        }
+        if (strafeLockDirection == 0) {
+            return getLateralBias();
+        }
+        return strafeLockDirection;
+    }
+
+    public long getLaneLockUntil() {
+        return laneLockUntil;
+    }
+
+    public boolean canReverseStrafeDirection(int nextDirection, int failureThreshold) {
+        int current = getStrafeLockDirection();
+        int desired = Integer.compare(nextDirection, 0);
+        if (current == 0 || desired == 0 || desired == current) {
+            return true;
+        }
+        if (System.currentTimeMillis() > laneLockUntil) {
+            return true;
+        }
+        return replanFailStreak >= Math.max(1, failureThreshold);
+    }
+
     public void notePathFailure(PathFailureType failureType) {
         lastPathFailureAt = System.currentTimeMillis();
         lastPathFailureDecayAt = lastPathFailureAt;
@@ -665,13 +736,16 @@ public class ZombieAgent {
             case SHORT_BLOCKED:
                 shortBlockedStrikes = Math.min(8, shortBlockedStrikes + 1);
                 missingPathStrikes = Math.max(0, missingPathStrikes - 1);
+                replanFailStreak = Math.min(12, replanFailStreak + 1);
                 break;
             case PATH_MISSING:
                 missingPathStrikes = Math.min(8, missingPathStrikes + 1);
+                replanFailStreak = Math.min(12, replanFailStreak + 2);
                 break;
             case HARD_STUCK:
                 shortBlockedStrikes = Math.min(8, shortBlockedStrikes + 1);
                 missingPathStrikes = Math.min(8, missingPathStrikes + 1);
+                replanFailStreak = Math.min(12, replanFailStreak + 3);
                 break;
             case NONE:
             default:
@@ -682,8 +756,13 @@ public class ZombieAgent {
     public void clearPathFailures() {
         shortBlockedStrikes = 0;
         missingPathStrikes = 0;
+        replanFailStreak = 0;
         lastPathFailureAt = 0L;
         lastPathFailureDecayAt = 0L;
+    }
+
+    public int getReplanFailStreak() {
+        return replanFailStreak;
     }
 
     public int getShortBlockedStrikes() {
@@ -771,6 +850,9 @@ public class ZombieAgent {
         pathModeLeaseUntil = 0L;
         movementIntent = MovementIntent.IDLE;
         movementIntentLeaseUntil = 0L;
+        targetLeaseUntil = 0L;
+        strafeLockDirection = 0;
+        laneLockUntil = 0L;
         setTargetEntity(null);
         setFocusTargetHint(null, 0L);
         setProtectTargetHint(null, 0L);

@@ -73,6 +73,18 @@ public class ConfigManager {
         return clampInt(config.getInt("zombie-ai.targeting.scan-cooldown-ms", 400), 100, 5000);
     }
 
+    public long getTargetingTargetLeaseMs() {
+        return clampInt(config.getInt("zombie-ai.targeting.target-lease-ms", 2400), 300, 15000);
+    }
+
+    public double getTargetingLeaseBreakScoreBonus() {
+        return clampDouble(config.getDouble("zombie-ai.targeting.lease-break-score-bonus", 0.28), 0.0, 5.0);
+    }
+
+    public double getTargetingSwitchDistanceAdvantage() {
+        return clampDouble(config.getDouble("zombie-ai.targeting.switch-distance-advantage", 3.5), 0.0, 24.0);
+    }
+
     public double getTargetingSwitchScoreDelta() {
         return clampDouble(config.getDouble("zombie-ai.targeting.switch-score-delta", 0.20), 0.0, 10.0);
     }
@@ -162,6 +174,14 @@ public class ConfigManager {
         return clampDouble(config.getDouble("zombie-ai.pathing.separation-range", 2.2), 0.8, 8.0);
     }
 
+    public long getPathingLaneLockMs() {
+        return clampInt(config.getInt("zombie-ai.pathing.lane-lock-ms", 2200), 250, 12000);
+    }
+
+    public int getPathingStrafeReverseFailureThreshold() {
+        return clampInt(config.getInt("zombie-ai.pathing.strafe-reverse-failure-threshold", 3), 1, 12);
+    }
+
     public int getRoutingReplanBaseTicks() {
         return clampInt(config.getInt("zombie-ai.routing.replan-base-ticks", 5), 1, 40);
     }
@@ -192,6 +212,10 @@ public class ConfigManager {
 
     public int getAsyncPlanTimeBudgetMs() {
         return clampInt(config.getInt("zombie-ai.async.plan-time-budget-ms", 3), 1, 50);
+    }
+
+    public double getAsyncOverloadTpsThreshold() {
+        return clampDouble(config.getDouble("zombie-ai.async.overload-tps-threshold", 17.8), 8.0, 20.0);
     }
 
     public java.util.Set<org.bukkit.entity.EntityType> getTargetWhitelist() {
@@ -337,7 +361,7 @@ public class ConfigManager {
     }
 
     public int getMaxZombiesPerChunk() {
-        return clampInt(config.getInt("spawn.max-zombies-per-chunk", 50), 1, 256);
+        return clampInt(config.getInt("spawn.max-zombies-per-chunk", 18), 1, 256);
     }
 
     public int getMsptThreshold() {
@@ -349,19 +373,19 @@ public class ConfigManager {
     }
 
     public long getSpawnChunkCooldownMs() {
-        return clampInt(config.getInt("spawn.algorithm.chunk-cooldown-ms", 320), 0, 120000);
+        return clampInt(config.getInt("spawn.algorithm.chunk-cooldown-ms", 180), 0, 120000);
     }
 
     public int getSpawnMaxGlobalZombies() {
-        return clampInt(config.getInt("spawn.algorithm.max-global-zombies", 720), 10, 10000);
+        return clampInt(config.getInt("spawn.algorithm.max-global-zombies", 1080), 10, 10000);
     }
 
     public int getSpawnMaxNearPlayer() {
-        return clampInt(config.getInt("spawn.algorithm.max-near-player", 96), 1, 500);
+        return clampInt(config.getInt("spawn.algorithm.max-near-player", 144), 1, 500);
     }
 
     public int getSpawnBudgetPerPlayer() {
-        return clampInt(config.getInt("spawn.algorithm.spawn-budget-per-player", 7), 1, 200);
+        return clampInt(config.getInt("spawn.algorithm.spawn-budget-per-player", 11), 1, 200);
     }
 
     public double getSpawnAcceptChance() {
@@ -378,6 +402,22 @@ public class ConfigManager {
 
     public int getSpawnVerticalSearchRange() {
         return clampInt(config.getInt("spawn.algorithm.vertical-search-range", 8), 2, 32);
+    }
+
+    public double getSpawnTpsSoftThreshold() {
+        return clampDouble(config.getDouble("spawn.algorithm.tps-soft-threshold", 18.7), 8.0, 20.0);
+    }
+
+    public double getSpawnTpsHardThreshold() {
+        return clampDouble(config.getDouble("spawn.algorithm.tps-hard-threshold", 17.2), 5.0, 20.0);
+    }
+
+    public double getSpawnTpsBudgetSoftScale() {
+        return clampDouble(config.getDouble("spawn.algorithm.tps-budget-soft-scale", 0.78), 0.1, 1.0);
+    }
+
+    public double getSpawnTpsBudgetHardScale() {
+        return clampDouble(config.getDouble("spawn.algorithm.tps-budget-hard-scale", 0.45), 0.05, 1.0);
     }
 
     public long getRecoveryRepathCooldownMs() {

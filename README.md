@@ -3,11 +3,12 @@
 Paper 1.21+ 的僵尸 AI 强化插件。
 
 ## 核心特性
-- 最新稳定性更新（v2.9.15）：
-  - 新增“已加载区块寻路硬拦截”：目标区块未加载时不提交远端路径，自动裁剪到近端已加载走廊，降低卡在 `initialize_light` 的概率。
-  - 新增“过载降级模式”：高压场景下自动降低重规划/异步规划频率，并强制收敛 Builder/Breaker，优先保主线程流畅。
-  - 夜间群刷落点检查改为 `world.isChunkLoaded(...)`，避免生成验证阶段触发潜在区块触碰。
-  - 全局硬上限逻辑修复：低配额配置现在会被严格尊重，不再被高硬编码门槛“抬高失效”。
+- 最新热修复（v2.9.16）：
+  - 锁敌稳定优先：目标租约窗 + 分差阈值 + 距离优势门槛，显著降低来回换目标与丢锁后乱逛。
+  - ZombieGame 风格防踱步：走廊侧移方向锁、短窗禁反向、近战阶段冻结高层重规划。
+  - 路径状态收敛：`LOCK_PURSUIT -> CORRIDOR -> BREACH -> CLOSE -> RECOVER`，结构模式只在 `path_missing/hard_stuck` 触发。
+  - 异步评分与同步评分统一：异步候选沿用同一套目标评分基线，过期计划仍由 epoch 丢弃。
+  - 激进刷新档 + TPS 安全阀：提高默认生成上限，同时按 TPS 软/硬阈值自动缩放预算，降低高压崩服风险。
 - 统一 encounter 等级：玩家威胁与附近玩家聚合后决定僵尸等级。
 - 事件系统已收敛为仅保留血月事件，入夜时会提示“血月降临了...”。
 - 强化等级系统：玩家等级支持 `level.max`（默认 12），并纳入伤害输出与 K/D 表现。
@@ -39,12 +40,15 @@ Paper 1.21+ 的僵尸 AI 强化插件。
 - `zombie-ai.cooperation.*` 协作阈值与冷却
 - `zombie-ai.pathing.*` 队形槽位与分离参数
 - `zombie-ai.targeting.*` 主动搜敌扫描与换目标阈值
+- `zombie-ai.targeting.target-lease-ms` / `lease-break-score-bonus` / `switch-distance-advantage`
+- `zombie-ai.pathing.lane-lock-ms` / `strafe-reverse-failure-threshold`
 - `zombie-ai.cooperation.encircle-*` 围压策略范围与重规划节奏
 - `zombie-ai.builder.*` Builder/Breaker 速度与失败阈值
 - `zombie-ai.builder.temporary-block-*` 临时方块生命周期与衰减裂纹
 - `zombie-ai.builder.break-*-particle-*` 破坏命中/完成粒子节流与强度
 - `zombie-ai.breaker.blacklist/whitelist` 破坏合法性白黑名单
 - `spawn.algorithm.*` 生成 pipeline
+- `spawn.algorithm.tps-soft-threshold` / `tps-hard-threshold` / `tps-budget-*-scale`
 - `level.threat.*` / `level.encounter.*` / `level.hysteresis.*` 玩家等级计算
 - `level.max` 玩家与遭遇等级上限
 - `breach.*` 破防角色租约与限额
@@ -53,7 +57,9 @@ Paper 1.21+ 的僵尸 AI 强化插件。
 - `/za debug spawn`：显示生成拒绝原因分布（如 `global_cap/chunk_cooldown/budget`）。
 - `/za debug ai`：显示破防分工计数 `breachRoleP/S/B` 与临时方块数量。
 - `/za debug ai`：额外输出 `builderFailures` 与 `breakerRejects`，用于排查 build/break 卡点。
+- `/za debug ai`：新增 `runtimeStats`（`targetSwitches/replans/corridorFallbacks/breachEntries/overloadTicks`）。
 - `/za debug system`：显示僵尸总量、临时方块总量、15 秒内即将到期数量与生成拒绝分布。
+- `/za debug system`：新增 `overloadMode` 观察当前是否处于过载降级态。
 - `/za debug reset`：清空 spawn/ai 调试统计，便于开始新一轮验收。
 
 ## 实机场景验收

@@ -208,9 +208,17 @@ public class SmartPathingBehavior {
         // 增加建造意愿：专家僵尸更容易开启建筑模式，普通僵尸如果卡住较久也会尝试
         if (terrainModificationEnabled && isSpecialist) {
             boolean structureLease = agent.isPathIntentLeased(ZombieAgent.PathIntent.STRUCTURE_BREACH_BUILD);
-            if ((structureLease || agent.checkAndResetSkillCooldown("STRUCT_MODE_ENTER", 1800L))
+            ZombieAgent.PathFailureType failureType = agent.getCurrentPathFailure();
+            boolean allowStructureEnter = structureLease
+                || failureType == ZombieAgent.PathFailureType.PATH_MISSING
+                || failureType == ZombieAgent.PathFailureType.HARD_STUCK;
+            if (allowStructureEnter
+                && (structureLease || agent.checkAndResetSkillCooldown("STRUCT_MODE_ENTER", 1800L))
                 && shouldStartStructuralMode(agent, targetLoc)) {
                 routeController.applyRouteState(agent, RouteController.RouteState.BREACH, ZombieAgent.PathIntent.STRUCTURE_BREACH_BUILD, targetLoc, 1500L);
+                if (!builder.isActive()) {
+                    ZombieAIManager.getInstance().recordAiRuntimeStat("breachEntries");
+                }
                 builder.setActive(true);
                 builder.tick();
                 return;
@@ -256,6 +264,7 @@ public class SmartPathingBehavior {
                 } else {
                     agent.notePathFailure(ZombieAgent.PathFailureType.SHORT_BLOCKED);
                 }
+                ZombieAIManager.getInstance().recordAiRuntimeStat("corridorFallbacks");
                 double distSq = corridorAnchor.distanceSquared(z.getLocation());
                 if (routeController.allowReplan(agent, corridorAnchor, distSq, 5.5)
                     || !agent.isPathIntentLeased(ZombieAgent.PathIntent.NAV_CORRIDOR)) {
@@ -622,20 +631,54 @@ public class SmartPathingBehavior {
         forward.normalize();
         Vector lateral = new Vector(-forward.getZ(), 0, forward.getX()).normalize();
 
-        int bias = agent.getLateralBias();
+        ConfigManager cfg = ConfigManager.getInstance();
+        int bias = agent.getStrafeLockDirection();
         if (bias == 0) {
             bias = (Math.abs(zombie.getUniqueId().hashCode()) % 2 == 0) ? 1 : -1;
-            agent.lockLateralBias(bias, 2200L);
+            agent.lockStrafeDirection(bias, cfg.getPathingLaneLockMs());
         }
 
         double distance = zombie.getLocation().distance(target);
         double forwardDistance = distance < 8.0 ? 3.0 : 4.5;
         double lateralDistance = distance < 8.0 ? 1.2 : 1.8;
+        int desiredBias = currentTarget != null
+            ? chooseBiasTowardTarget(agent, zombie, currentTarget, bias, cfg.getPathingStrafeReverseFailureThreshold())
+            : bias;
+        if (desiredBias != bias) {
+            bias = desiredBias;
+            agent.lockStrafeDirection(bias, cfg.getPathingLaneLockMs());
+        }
         Location corridor = zombie.getLocation().clone()
             .add(forward.clone().multiply(forwardDistance))
             .add(lateral.multiply(lateralDistance * bias));
         corridor.setY(zombie.getLocation().getY());
         return corridor;
+    }
+
+    private int chooseBiasTowardTarget(
+        ZombieAgent agent,
+        Zombie zombie,
+        LivingEntity currentTarget,
+        int currentBias,
+        int reverseFailureThreshold
+    ) {
+        Vector toTarget = currentTarget.getLocation().toVector().subtract(zombie.getLocation().toVector()).setY(0);
+        if (toTarget.lengthSquared() < 0.04) {
+            return currentBias;
+        }
+        Vector facing = zombie.getLocation().getDirection().setY(0);
+        if (facing.lengthSquared() < 0.04) {
+            return currentBias;
+        }
+        double cross = facing.getX() * toTarget.getZ() - facing.getZ() * toTarget.getX();
+        int desired = cross >= 0 ? 1 : -1;
+        if (desired == currentBias) {
+            return currentBias;
+        }
+        if (!agent.canReverseStrafeDirection(desired, reverseFailureThreshold)) {
+            return currentBias;
+        }
+        return desired;
     }
 
     private boolean hasDropRiskAhead(Zombie zombie, Location desiredTarget) {
