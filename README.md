@@ -1,6 +1,6 @@
 # TooMuchZombies
 
-Paper 1.21+ 的僵尸 AI 强化插件。
+Paper 1.21.X 的僵尸 AI 强化插件。
 
 ## 核心特性
 - 最新热修复（v2.9.16）：
