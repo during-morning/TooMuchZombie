@@ -186,7 +186,10 @@ public class ZombieBuilderBehavior {
 
             if (requiredKind == BlockKind.AIR) {
                 if (breaker.canBreak(currentBlock)) {
+                    // 中断建造，开始破坏
+                    interruptForBreaking();
                     breaker.startBreaking(currentBlock);
+                    agent.setBreaking(true);
                     if (!breaker.isBreaking()) {
                         recoverFromPlacementFailure(currentBlock);
                         stuckTicks++;
@@ -694,6 +697,29 @@ public class ZombieBuilderBehavior {
 
     private void hitFailure(String reason) {
         failureCounters.merge(reason, 1, Integer::sum);
+    }
+    
+    // 中断和恢复机制
+    private boolean wasInterrupted = false;
+    
+    public boolean wasInterruptedByBreaker() {
+        return wasInterrupted;
+    }
+    
+    public void resumeAfterBreak() {
+        if (wasInterrupted) {
+            wasInterrupted = false;
+            setActive(true);
+            agent.setBuilding(true);
+        }
+    }
+    
+    public void interruptForBreaking() {
+        if (active) {
+            wasInterrupted = true;
+            setActive(false);
+            agent.setBuilding(false);
+        }
     }
     
     // Simple BlockPos helper class since we can't use NMS BlockPos easily without import issues

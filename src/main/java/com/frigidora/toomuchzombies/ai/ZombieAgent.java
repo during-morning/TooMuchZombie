@@ -453,6 +453,8 @@ public class ZombieAgent {
     }
 
     private boolean aiPaused = false;
+    private boolean isBreaking = false;
+    private boolean isBuilding = false;
 
     public void setAiPaused(boolean paused) {
         this.aiPaused = paused;
@@ -460,6 +462,18 @@ public class ZombieAgent {
 
     public boolean isAiPaused() {
         return aiPaused;
+    }
+
+    public boolean isBusy() {
+        return isBreaking || isBuilding || breakerBehavior.isBreaking() || builderBehavior.isActive();
+    }
+
+    public void setBreaking(boolean breaking) {
+        this.isBreaking = breaking;
+    }
+
+    public void setBuilding(boolean building) {
+        this.isBuilding = building;
     }
 
     public void beginBehaviorTick(long currentTick) {
@@ -491,6 +505,7 @@ public class ZombieAgent {
         }
         if (aiPaused) {
             zombie.setTarget(null); // 如果 AI 已暂停，清除目标以防止干扰手动移动
+            return; // 修复：AI暂停时直接返回，不执行移动
         }
 
         Location currentLoc = zombie.getLocation();

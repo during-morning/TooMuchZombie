@@ -675,16 +675,18 @@ public class ZombieAIManager implements Listener {
             }
             
             // 3. 执行 AI 行为
-            // 优化：移除此处的 AI 执行，交由 ZombieBehaviorGoal (Paper Goal) 每 tick 执行
-            // 这里只负责管理任务（如清理、分区更新）
-            /*
+            // 修复：恢复主循环中的 AI 执行，确保所有僵尸都能正常移动
+            // 分时调度已经在外层循环实现，这里只需要执行行为即可
             try {
                 executeBehavior(agent);
             } catch (Exception e) {
                 // 防止单个实体错误导致崩溃
-                e.printStackTrace();
+                if (agent.checkAndResetSkillCooldown("AI_EXEC_ERR_LOG", 5000L)) {
+                    TooMuchZombies.getInstance().getLogger().warning(
+                        "processAgents executeBehavior failure for " + uuid + ": " + e.getClass().getSimpleName()
+                    );
+                }
             }
-            */
         }
     }
 

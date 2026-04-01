@@ -117,9 +117,11 @@ public class ZombieBreakerBehavior {
 
         if (!zombie.isValid() || currentTarget.getType() == Material.AIR || !canBreak(currentTarget)) {
             stopBreaking();
+            agent.setBreaking(false);
             return;
         }
 
+        agent.setBreaking(true);
         zombie.swingMainHand();
         breakProgress += getBreakSpeed(currentTarget) * (float) ConfigManager.getInstance().getBreakSpeed();
 
@@ -145,6 +147,12 @@ public class ZombieBreakerBehavior {
             Block finished = currentTarget;
             breakBlock(finished);
             stopBreaking();
+            agent.setBreaking(false);
+            
+            // 破坏完成后，如果 Builder 之前是活跃的，恢复建造
+            if (agent.getBuilderBehavior().wasInterruptedByBreaker()) {
+                agent.getBuilderBehavior().resumeAfterBreak();
+            }
         }
     }
 

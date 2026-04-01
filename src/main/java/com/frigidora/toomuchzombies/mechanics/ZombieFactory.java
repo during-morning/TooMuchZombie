@@ -44,6 +44,18 @@ public class ZombieFactory {
 
     private static final Map<String, LongAdder> spawnRejectReasons = new ConcurrentHashMap<>();
     private static final Map<String, Long> chunkCooldowns = new ConcurrentHashMap<>();
+    private static final Map<String, ChunkZombieCountCacheEntry> chunkZombieCountCache = new ConcurrentHashMap<>();
+    private static final long CHUNK_ZOMBIE_CACHE_TTL_MS = 800L;
+
+    private static final class ChunkZombieCountCacheEntry {
+        private final int count;
+        private final long updatedAtMs;
+
+        private ChunkZombieCountCacheEntry(int count, long updatedAtMs) {
+            this.count = count;
+            this.updatedAtMs = updatedAtMs;
+        }
+    }
 
     public static void loadConfig() {
         List<String> configBlocks = TooMuchZombies.getInstance().getConfig().getStringList("zombie-ai.build-blocks");
@@ -95,6 +107,7 @@ public class ZombieFactory {
     public static void resetSpawnRejectStats() {
         spawnRejectReasons.clear();
         chunkCooldowns.clear();
+        chunkZombieCountCache.clear();
     }
 
     private static String chunkKey(Chunk chunk) {
@@ -196,14 +209,7 @@ public class ZombieFactory {
         loc.setY(adjusted.getY());
         loc.setZ(adjusted.getZ());
 
-        int nearbyManaged = 0;
-        for (Entity e : nearest.getNearbyEntities(96, 96, 96)) {
-            if (e instanceof Zombie z) {
-                if (ZombieAIManager.getInstance().getAgent(z.getUniqueId()) != null) {
-                    nearbyManaged++;
-                }
-            }
-        }
+        int nearbyManaged = countManagedZombiesNear(nearest.getLocation(), 96.0);
 
         // 只用插件管理僵尸参与配额判定，避免被原版自然僵尸误伤配额。
         int effectiveNearCap = Math.max(8, (int) Math.floor(cfg.getSpawnMaxNearPlayer() * Math.max(0.55, spawnScale)));
@@ -283,12 +289,7 @@ public class ZombieFactory {
             return false;
         }
 
-        int nearbyManaged = 0;
-        for (Entity entity : nearest.getNearbyEntities(96, 96, 96)) {
-            if (entity instanceof Zombie zombie && isManagedZombie(zombie)) {
-                nearbyManaged++;
-            }
-        }
+        int nearbyManaged = countManagedZombiesNear(nearest.getLocation(), 96.0);
 
         int effectiveNearCap = Math.max(8, (int) Math.floor(cfg.getSpawnMaxNearPlayer() * Math.max(0.55, spawnScale)));
         if (nearbyManaged >= effectiveNearCap) {
@@ -688,9 +689,31 @@ public class ZombieFactory {
     }
 
     private static int countZombiesInChunk(Chunk chunk) {
+        String key = chunkKey(chunk);
+        long now = System.currentTimeMillis();
+        ChunkZombieCountCacheEntry cached = chunkZombieCountCache.get(key);
+        if (cached != null && now - cached.updatedAtMs <= CHUNK_ZOMBIE_CACHE_TTL_MS) {
+            return cached.count;
+        }
+
         int count = 0;
         for (Entity entity : chunk.getEntities()) {
             if (entity instanceof Zombie) {
+                count++;
+            }
+        }
+        chunkZombieCountCache.put(key, new ChunkZombieCountCacheEntry(count, now));
+        return count;
+    }
+
+    private static int countManagedZombiesNear(Location center, double radius) {
+        if (center == null || center.getWorld() == null) {
+            return 0;
+        }
+        int count = 0;
+        for (com.frigidora.toomuchzombies.ai.ZombieAgent agent : ZombieAIManager.getInstance().getNearbyAgents(center, radius)) {
+            Zombie z = agent.getZombie();
+            if (z != null && z.isValid() && center.getWorld().equals(z.getWorld())) {
                 count++;
             }
         }

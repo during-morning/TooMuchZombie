@@ -339,6 +339,10 @@ public class ConfigManager {
     public double getBuilderChance() {
         return clampDouble(config.getDouble("zombie-roles.builder", 0.1), 0.0, 1.0);
     }
+    
+    public String getBuilderPlacementMaterial() {
+        return config.getString("zombie-ai.builder.placement-material", "DIRT");
+    }
 
     public double getArcherChance() {
         return clampDouble(config.getDouble("zombie-roles.archer", 0.1), 0.0, 1.0);

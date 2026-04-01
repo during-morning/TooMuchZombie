@@ -33,6 +33,7 @@ public class TooMuchZombies extends JavaPlugin {
         com.frigidora.toomuchzombies.mechanics.DropCleanupManager.initialize();
         com.frigidora.toomuchzombies.mechanics.ZombieFactory.loadConfig();
         com.frigidora.toomuchzombies.ai.ZombieAIManager.initialize();
+        com.frigidora.toomuchzombies.mechanics.SoundAttractionManager.initialize();
         
         // 注册命令
         getCommand("za").setExecutor(new com.frigidora.toomuchzombies.commands.ZACommand());

@@ -31,6 +31,25 @@ public class SmartPathingBehavior {
         Location targetLoc = agent.getLastKnownTargetLocation();
         boolean overloadMode = ZombieAIManager.getInstance().isOverloadMode();
         
+        // --- 优先级 0: 检查是否正在执行其他行为 ---
+        if (agent.isBusy()) {
+            // 正在破坏或建造，停止移动让行为完成
+            if (z.getPathfinder().hasPath()) {
+                z.getPathfinder().stopPathfinding();
+            }
+            // 继续执行当前行为
+            ZombieBuilderBehavior builder = agent.getBuilderBehavior();
+            ZombieBreakerBehavior breaker = agent.getBreakerBehavior();
+            if (builder.isActive()) {
+                builder.tick();
+                return;
+            }
+            if (breaker.isBreaking()) {
+                breaker.tick();
+                return;
+            }
+        }
+        
         // --- 全局 Debuff 系统：白天/强光下减速虚弱 ---
         // 性能优化：每 20 tick (1秒) 检查一次，而不是每 tick
         if (z.getTicksLived() % 20 == 0) {
@@ -79,23 +98,23 @@ public class SmartPathingBehavior {
         }
 
         // 3. 移动锁定检查（如果正在搭建或破坏，禁止原版移动）
-        if (agent.isAiPaused() || (terrainModificationEnabled && (builder.isActive() || breaker.isBreaking()))) {
-            // 只有当不是 Builder 模式，或者 Builder 明确不需要移动时才停止路径
-            if (!builder.isActive()) {
-                if (z.getPathfinder().hasPath()) {
-                    z.getPathfinder().stopPathfinding();
-                }
+        if (agent.isAiPaused()) {
+            // AI 暂停，完全停止
+            if (z.getPathfinder().hasPath()) {
+                z.getPathfinder().stopPathfinding();
             }
-            
-            // 维持当前位置的微调
-            if (builder.isActive()) {
-                builder.tick(); // 委托给 Builder
-                return;
+            return;
+        }
+        
+        // 如果正在执行结构性行为，已经在上面处理过了，这里不应该到达
+        // 但为了安全起见，再次检查
+        if (terrainModificationEnabled && (builder.isActive() || breaker.isBreaking())) {
+            // 这种情况不应该发生，因为上面已经 return 了
+            // 但如果发生了，确保停止移动
+            if (z.getPathfinder().hasPath()) {
+                z.getPathfinder().stopPathfinding();
             }
-            if (breaker.isBreaking()) {
-                breaker.tick(); // 委托给 Breaker
-                return;
-            }
+            return;
         }
         
         // 4. 协作逻辑 (Combat Zombies)
@@ -160,6 +179,9 @@ public class SmartPathingBehavior {
             return;
         }
 
+        // 保底机制：如果有目标但没有其他移动指令，至少尝试直接移动到目标
+        boolean hasMovementPlan = false;
+
         boolean meleeEngaged = currentTarget != null
             && currentTarget.isValid()
             && currentTarget.getWorld().equals(z.getWorld())
@@ -174,6 +196,7 @@ public class SmartPathingBehavior {
             if (z.getPathfinder().hasPath()) {
                 z.getPathfinder().stopPathfinding();
             }
+            hasMovementPlan = true;
             return;
         }
 
@@ -182,11 +205,13 @@ public class SmartPathingBehavior {
             if (terrainModificationEnabled && (agent.getRole() == ZombieRole.BUILDER || agent.getRole() == ZombieRole.MINER)) {
                 builder.setActive(true);
                 builder.tick();
+                hasMovementPlan = true;
                 return;
             }
             if (agent.checkAndResetSkillCooldown("FORCED_REPATH", ConfigManager.getInstance().getRecoveryRepathCooldownMs())) {
                 routeController.applyRouteState(agent, RouteController.RouteState.RECOVER, ZombieAgent.PathIntent.NAV_CORRIDOR, targetLoc, 750L);
                 agent.submitMoveIntent(targetLoc, 0.96, ZombieAgent.MovementPriority.HIGH, ZombieAgent.PathIntent.NAV_CORRIDOR, 750L);
+                hasMovementPlan = true;
             }
         }
 
@@ -304,6 +329,15 @@ public class SmartPathingBehavior {
         if (terrainModificationEnabled && !builder.isActive() && isSpecialist) {
             handleSimpleObstacle(agent, targetLoc, breaker);
         }
+        
+        // 11. 保底机制：如果有目标但没有提交任何移动指令，强制尝试移动到目标
+        if (!hasMovementPlan && targetLoc != null && targetLoc.getWorld() != null && targetLoc.getWorld().equals(z.getWorld())) {
+            double distSq = z.getLocation().distanceSquared(targetLoc);
+            if (distSq > 4.0) { // 距离大于2格才移动
+                agent.submitMoveIntent(targetLoc, 0.90, ZombieAgent.MovementPriority.LOW, ZombieAgent.PathIntent.NAV_CORRIDOR, 800L);
+                ZombieAIManager.getInstance().recordAiRuntimeStat("fallbackMoves");
+            }
+        }
     }
 
 
@@ -355,6 +389,15 @@ public class SmartPathingBehavior {
 
     private void applyFocusFormation(ZombieAgent agent, LivingEntity focusTarget, int slotIndex) {
         Zombie z = agent.getZombie();
+        if (!agent.checkAndResetSkillCooldown("FORMATION_RECOMPUTE", 220L)) {
+            Location cached = agent.getPathAnchor();
+            if (cached != null
+                && cached.getWorld() != null
+                && cached.getWorld().equals(z.getWorld())) {
+                agent.submitMoveIntent(cached, 0.92, ZombieAgent.MovementPriority.MEDIUM, ZombieAgent.PathIntent.NAV_CORRIDOR, 600L);
+            }
+            return;
+        }
         Location target = focusTarget.getLocation();
         double spacing = com.frigidora.toomuchzombies.config.ConfigManager.getInstance().getFormationSlotSpacing();
         double separationWeight = com.frigidora.toomuchzombies.config.ConfigManager.getInstance().getFormationSeparationWeight();
@@ -514,44 +557,34 @@ public class SmartPathingBehavior {
             return agent.isStuckCached();
         }
 
-        // 对齐 ZombieGame：受击后短时间内优先追击/战斗，而非立即开始搭建。
-        if (agent.wasDamagedRecently(1500) && agent.getTicksStuck() < ConfigManager.getInstance().getRecoveryStuckTeleportTicks()) {
+        // 参考 ZombieGame 的简化逻辑：
+        // 1. 最近受伤 -> 优先战斗，不建造
+        if (agent.wasDamagedRecently(1500)) {
             return false;
         }
 
+        // 2. 已经卡住 -> 立即建造
         if (agent.isStuckCached()) {
             return true;
         }
 
-        ZombieAgent.PathFailureType failureType = agent.getCurrentPathFailure();
-        if (failureType == ZombieAgent.PathFailureType.HARD_STUCK) {
-            return true;
-        }
-        if (failureType == ZombieAgent.PathFailureType.PATH_MISSING && agent.getMissingPathStrikes() >= 3) {
-            return true;
-        }
-
+        // 3. 核心条件：无法寻路 + 距离适中 + 冷却完成
+        boolean noPath = z.getPathfinder() == null || !z.getPathfinder().hasPath();
         double distSq = z.getLocation().distanceSquared(targetLoc);
-        if (distSq <= 4.0) {
+        boolean distanceOk = distSq > 9.0 && distSq <= 400.0; // 3-20 格
+        
+        if (!noPath || !distanceOk) {
             return false;
         }
 
-        if (z.getPathfinder() != null && z.getPathfinder().hasPath()
-            && distSq <= 24.0 * 24.0 && !agent.isStuckCached()) {
-            return false;
-        }
-
-        double yDiff = targetLoc.getY() - z.getLocation().getY();
-        if (yDiff >= 1.8 && distSq <= 16.0 * 16.0) {
-            return true;
-        }
-
+        // 4. 检查是否有明显的障碍物
         Vector dir = targetLoc.toVector().subtract(z.getLocation().toVector()).setY(0);
         if (dir.lengthSquared() < 0.04) {
             return false;
         }
         dir.normalize();
 
+        // 检查前方 2 格是否有障碍
         Block first = z.getLocation().add(dir.clone().multiply(1.0)).getBlock();
         Block firstHead = first.getRelative(BlockFace.UP);
         Block second = z.getLocation().add(dir.clone().multiply(2.0)).getBlock();
@@ -559,25 +592,20 @@ public class SmartPathingBehavior {
 
         boolean blockedAhead = first.getType().isSolid() || firstHead.getType().isSolid()
             || second.getType().isSolid() || secondHead.getType().isSolid();
-        if (blockedAhead) {
-            return failureType == ZombieAgent.PathFailureType.PATH_MISSING
-                || failureType == ZombieAgent.PathFailureType.HARD_STUCK
-                || distSq <= 12.0 * 12.0;
-        }
-
+        
+        // 检查前方是否有坑
         Block frontGround = first.getRelative(BlockFace.DOWN);
         boolean gapAhead = !frontGround.getType().isSolid();
-        if (gapAhead && distSq >= 9.0) {
-            return failureType == ZombieAgent.PathFailureType.PATH_MISSING
-                || failureType == ZombieAgent.PathFailureType.HARD_STUCK
-                || distSq >= 18.0 * 18.0;
-        }
+        
+        // 检查高度差
+        double yDiff = targetLoc.getY() - z.getLocation().getY();
+        boolean highWall = yDiff >= 1.8;
 
-        // 兜底：当原版寻路持续拿不到路径并且已有明显卡顿时，才切结构模式。
-        return z.getPathfinder() != null
-            && !z.getPathfinder().hasPath()
-            && distSq >= 20.0 * 20.0
-            && agent.getCurrentPathFailure() != ZombieAgent.PathFailureType.NONE;
+        // 满足任一条件即可建造：
+        // - 前方有障碍物
+        // - 前方有坑
+        // - 目标在高处
+        return blockedAhead || gapAhead || highWall;
     }
 
     private boolean shouldUseDirectChase(ZombieAgent agent, Zombie zombie, LivingEntity currentTarget, Location desiredTarget) {

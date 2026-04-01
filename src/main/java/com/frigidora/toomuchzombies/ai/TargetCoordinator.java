@@ -30,7 +30,12 @@ public class TargetCoordinator {
     }
 
     public void chooseOrRefreshTarget(ZombieAgent agent) {
-        if (!agent.checkAndResetSkillCooldown("TARGET_SCAN", ConfigManager.getInstance().getTargetingScanCooldownMs())) {
+        ConfigManager cfg = ConfigManager.getInstance();
+        long scanCooldown = cfg.getTargetingScanCooldownMs();
+        if (manager.isOverloadMode()) {
+            scanCooldown = Math.max(scanCooldown, scanCooldown * 2L);
+        }
+        if (!agent.checkAndResetSkillCooldown("TARGET_SCAN", scanCooldown)) {
             return;
         }
 
@@ -39,7 +44,6 @@ public class TargetCoordinator {
             return;
         }
 
-        ConfigManager cfg = ConfigManager.getInstance();
         Set<EntityType> whitelist = cfg.getTargetWhitelist();
         Set<EntityType> blacklist = cfg.getTargetBlacklist();
         LivingEntity current = resolveCurrentTarget(agent, zombie, whitelist, blacklist);
@@ -56,6 +60,9 @@ public class TargetCoordinator {
             Math.min(cfg.getTargetingMaxRange(), cfg.getHiveMindSensorRange()),
             cfg.getTargetingRecognitionRange()
         );
+
+        boolean includeEntitySweep = !manager.isOverloadMode()
+            && agent.checkAndResetSkillCooldown("TARGET_NEARBY_SCAN", 900L);
 
         if (current != null) {
             double holdRangeSq = (maxRange + 14.0) * (maxRange + 14.0);
@@ -77,7 +84,7 @@ public class TargetCoordinator {
         LivingEntity best = null;
         double bestScore = Double.NEGATIVE_INFINITY;
 
-        for (LivingEntity candidate : collectCandidates(agent, zombie, maxRange, focusHint, protectHint, whitelist, blacklist)) {
+        for (LivingEntity candidate : collectCandidates(agent, zombie, maxRange, focusHint, protectHint, whitelist, blacklist, includeEntitySweep)) {
             double score = evaluateTargetScore(agent, zombie, candidate, currentTargetId, plannedId, focusHint, protectHint);
             if (score > bestScore) {
                 bestScore = score;
@@ -134,7 +141,8 @@ public class TargetCoordinator {
         LivingEntity focusHint,
         LivingEntity protectHint,
         Set<EntityType> whitelist,
-        Set<EntityType> blacklist
+        Set<EntityType> blacklist,
+        boolean includeEntitySweep
     ) {
         List<LivingEntity> out = new ArrayList<>();
         Set<UUID> seen = new HashSet<>();
@@ -163,19 +171,21 @@ public class TargetCoordinator {
             }
         }
 
-        for (Entity nearby : zombie.getNearbyEntities(maxRange, Math.max(10.0, maxRange * 0.6), maxRange)) {
-            if (!(nearby instanceof LivingEntity living)) {
-                continue;
-            }
-            if (seen.contains(living.getUniqueId())) {
-                continue;
-            }
-            if (!isViableTarget(living, zombie, whitelist, blacklist)) {
-                continue;
-            }
-            if (zombie.getLocation().distanceSquared(living.getLocation()) <= rangeSq) {
-                seen.add(living.getUniqueId());
-                out.add(living);
+        if (includeEntitySweep) {
+            for (Entity nearby : zombie.getNearbyEntities(maxRange, Math.max(10.0, maxRange * 0.6), maxRange)) {
+                if (!(nearby instanceof LivingEntity living)) {
+                    continue;
+                }
+                if (seen.contains(living.getUniqueId())) {
+                    continue;
+                }
+                if (!isViableTarget(living, zombie, whitelist, blacklist)) {
+                    continue;
+                }
+                if (zombie.getLocation().distanceSquared(living.getLocation()) <= rangeSq) {
+                    seen.add(living.getUniqueId());
+                    out.add(living);
+                }
             }
         }
 
