@@ -42,6 +42,7 @@ public class TooMuchZombies extends JavaPlugin {
         getServer().getPluginManager().registerEvents(new com.frigidora.toomuchzombies.listeners.GameEventListener(), this);
         getServer().getPluginManager().registerEvents(new com.frigidora.toomuchzombies.listeners.BeaconListener(), this);
         getServer().getPluginManager().registerEvents(new com.frigidora.toomuchzombies.listeners.WorldListener(), this);
+        getServer().getPluginManager().registerEvents(new com.frigidora.toomuchzombies.listeners.ZombieEventListener(this), this);
     }
 
     @Override

@@ -737,6 +737,9 @@ public class ZombieAIManager implements Listener {
                 if (Math.random() < 0.1) { // 每 tick 10% 概率广播
                     hiveMindManager.broadcastTarget(target, agent.getZombie());
                 }
+                
+                // 定期召唤附近僵尸
+                com.frigidora.toomuchzombies.listeners.ZombieEventListener.tickPeriodicCall(agent);
             }
 
             AbilityIntent intent = abilityArbitrator.decide(agent);
@@ -746,7 +749,20 @@ public class ZombieAIManager implements Listener {
             // 2. 执行行为（仲裁）
             switch (intent) {
                 case CHASE_COMBAT:
+                    // 近战攻击行为（包含建造触发）
+                    if (agent.getMeleeAttackBehavior().canBeUsed()) {
+                        agent.getMeleeAttackBehavior().tick();
+                    }
+                    
+                    // BuilderV2 处理
+                    if (agent.getBuilderBehaviorV2().isActive()) {
+                        agent.getBuilderBehaviorV2().tick();
+                    }
+                    
+                    // 路径移动
                     pathingBehavior.tick(agent);
+                    
+                    // 战斗行为
                     if (!structuralBusy && !overloadMode) {
                         combatBehavior.tick(agent);
                     }

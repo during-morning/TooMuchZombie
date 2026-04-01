@@ -121,6 +121,8 @@ public class ZombieAgent {
     // 特殊状态
     private int teleportCount = 0;
     private long shieldGuardUntil = 0;
+    private boolean isWalking = false;
+    private boolean isBuilding = false;
     
     // 卡死检测
     private Location lastStuckCheckLocation;
@@ -152,6 +154,8 @@ public class ZombieAgent {
     private final com.frigidora.toomuchzombies.ai.behavior.ZombieBuilderBehavior builderBehavior;
     private final com.frigidora.toomuchzombies.ai.behavior.ZombieSuicideBehavior suicideBehavior;
     private final com.frigidora.toomuchzombies.ai.behavior.ZombieCooperationBehavior cooperationBehavior;
+    private final com.frigidora.toomuchzombies.ai.behavior.ZombieBuilderBehaviorV2 builderBehaviorV2;
+    private final com.frigidora.toomuchzombies.ai.behavior.ZombieMeleeAttackBehavior meleeAttackBehavior;
 
     public ZombieAgent(Zombie zombie, ZombieRole role) {
         this.zombie = zombie;
@@ -162,6 +166,8 @@ public class ZombieAgent {
         this.builderBehavior = new com.frigidora.toomuchzombies.ai.behavior.ZombieBuilderBehavior(this, this.breakerBehavior);
         this.suicideBehavior = new com.frigidora.toomuchzombies.ai.behavior.ZombieSuicideBehavior(this);
         this.cooperationBehavior = new com.frigidora.toomuchzombies.ai.behavior.ZombieCooperationBehavior(this);
+        this.builderBehaviorV2 = new com.frigidora.toomuchzombies.ai.behavior.ZombieBuilderBehaviorV2(this, this.breakerBehavior);
+        this.meleeAttackBehavior = new com.frigidora.toomuchzombies.ai.behavior.ZombieMeleeAttackBehavior(this, this.builderBehaviorV2);
     }
 
     public com.frigidora.toomuchzombies.ai.behavior.ZombieBreakerBehavior getBreakerBehavior() {
@@ -178,6 +184,30 @@ public class ZombieAgent {
     
     public com.frigidora.toomuchzombies.ai.behavior.ZombieCooperationBehavior getCooperationBehavior() {
         return cooperationBehavior;
+    }
+    
+    public com.frigidora.toomuchzombies.ai.behavior.ZombieBuilderBehaviorV2 getBuilderBehaviorV2() {
+        return builderBehaviorV2;
+    }
+    
+    public com.frigidora.toomuchzombies.ai.behavior.ZombieMeleeAttackBehavior getMeleeAttackBehavior() {
+        return meleeAttackBehavior;
+    }
+    
+    public boolean isWalking() {
+        return isWalking;
+    }
+    
+    public void setWalking(boolean walking) {
+        this.isWalking = walking;
+    }
+    
+    public boolean isBuilding() {
+        return isBuilding || builderBehaviorV2.isActive();
+    }
+    
+    public void setBuilding(boolean building) {
+        this.isBuilding = building;
     }
 
     public void recordDamage(Location sourceLocation) {
@@ -454,7 +484,6 @@ public class ZombieAgent {
 
     private boolean aiPaused = false;
     private boolean isBreaking = false;
-    private boolean isBuilding = false;
 
     public void setAiPaused(boolean paused) {
         this.aiPaused = paused;
@@ -470,10 +499,6 @@ public class ZombieAgent {
 
     public void setBreaking(boolean breaking) {
         this.isBreaking = breaking;
-    }
-
-    public void setBuilding(boolean building) {
-        this.isBuilding = building;
     }
 
     public void beginBehaviorTick(long currentTick) {
@@ -881,7 +906,114 @@ public class ZombieAgent {
         builderBehavior.setActive(false);
         breakerBehavior.stopBreaking();
         suicideBehavior.resetCharge();
+        builderBehaviorV2.setActive(false);
+        meleeAttackBehavior.cancelBuild();
         cooperationBehavior.clearTransientState();
+    }
+    
+    /**
+     * 僵尸攻击时的回调 - 从 ZombieGame 移植
+     */
+    public void onZombieAttack() {
+        // 停止建造
+        if (builderBehaviorV2.isActive()) {
+            builderBehaviorV2.setActive(false);
+            meleeAttackBehavior.cancelBuild();
+        }
+        
+        // 停止破坏
+        if (breakerBehavior.isBreaking()) {
+            breakerBehavior.stopBreaking();
+        }
+        
+        // 停止游走
+        setWalking(false);
+    }
+    
+    /**
+     * 僵尸受伤时的回调 - 从 ZombieGame 移植
+     */
+    public void onZombieHurt() {
+        // 停止建造
+        if (builderBehaviorV2.isActive()) {
+            builderBehaviorV2.setActive(false);
+            meleeAttackBehavior.cancelBuild();
+        }
+        
+        // 停止破坏
+        if (breakerBehavior.isBreaking()) {
+            breakerBehavior.stopBreaking();
+        }
+        
+        // 停止游走
+        setWalking(false);
+        
+        // 召唤附近僵尸
+        callToAttack(zombie.getTarget());
+    }
+    
+    /**
+     * 群体召唤机制 - 从 ZombieGame 完整移植
+     * 当僵尸受伤或发现目标时，召唤附近的僵尸一起攻击
+     */
+    public void callToAttack(LivingEntity target) {
+        if (target == null || !target.isValid() || target.isDead()) {
+            return;
+        }
+        
+        // 检查目标是否可攻击
+        if (target instanceof org.bukkit.entity.Player) {
+            org.bukkit.entity.Player player = (org.bukkit.entity.Player) target;
+            org.bukkit.GameMode mode = player.getGameMode();
+            if (mode == org.bukkit.GameMode.CREATIVE || mode == org.bukkit.GameMode.SPECTATOR) {
+                return;
+            }
+        }
+        
+        // 获取附近的僵尸（75格范围）
+        double range = 75.0;
+        java.util.Collection<org.bukkit.entity.Entity> nearbyEntities = zombie.getWorld().getNearbyEntities(
+            zombie.getLocation(), range, 50.0, range,
+            entity -> entity instanceof org.bukkit.entity.Zombie && entity.isValid()
+        );
+        
+        int called = 0;
+        for (org.bukkit.entity.Entity entity : nearbyEntities) {
+            if (!(entity instanceof org.bukkit.entity.Zombie)) {
+                continue;
+            }
+            
+            org.bukkit.entity.Zombie otherZombie = (org.bukkit.entity.Zombie) entity;
+            
+            // 跳过自己
+            if (otherZombie.getUniqueId().equals(zombie.getUniqueId())) {
+                continue;
+            }
+            
+            // 检查视线或游戏阶段
+            boolean hasLineOfSight = zombie.hasLineOfSight(otherZombie);
+            boolean lateGame = zombie.getWorld().getTime() >= 18000; // 夜晚
+            
+            if (!hasLineOfSight && !lateGame) {
+                continue;
+            }
+            
+            // 如果该僵尸没有目标，设置目标
+            if (otherZombie.getTarget() == null) {
+                otherZombie.setTarget(target);
+                called++;
+            }
+        }
+        
+        // 调试日志
+        if (called > 0 && com.frigidora.toomuchzombies.TooMuchZombies.getInstance().getConfig().getBoolean("debug.group-call", false)) {
+            com.frigidora.toomuchzombies.TooMuchZombies.getInstance().getLogger().info(
+                String.format("Zombie %s called %d allies to attack %s",
+                    zombie.getUniqueId().toString().substring(0, 8),
+                    called,
+                    target.getName())
+            );
+        }
     }
     
     public long getLastSpatialKey() {
