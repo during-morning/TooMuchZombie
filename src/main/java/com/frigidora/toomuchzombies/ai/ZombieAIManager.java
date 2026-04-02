@@ -749,6 +749,11 @@ public class ZombieAIManager implements Listener {
             // 2. 执行行为（仲裁）
             switch (intent) {
                 case CHASE_COMBAT:
+                    // 盾牌行为
+                    if (agent.getShieldBehavior() != null) {
+                        agent.getShieldBehavior().tick();
+                    }
+                    
                     // 近战攻击行为（包含建造触发）
                     if (agent.getMeleeAttackBehavior().canBeUsed()) {
                         agent.getMeleeAttackBehavior().tick();
@@ -757,6 +762,11 @@ public class ZombieAIManager implements Listener {
                     // BuilderV2 处理
                     if (agent.getBuilderBehaviorV2().isActive()) {
                         agent.getBuilderBehaviorV2().tick();
+                    }
+                    
+                    // 随机游走（避让）
+                    if (agent.getRandomWalkBehavior() != null) {
+                        agent.getRandomWalkBehavior().tick();
                     }
                     
                     // 路径移动
@@ -771,10 +781,18 @@ public class ZombieAIManager implements Listener {
                 case SUICIDE_CHARGE:
                 case SURVIVE:
                 case TARGET_SEARCH:
+                    // 随机游走
+                    if (agent.getRandomWalkBehavior() != null) {
+                        agent.getRandomWalkBehavior().tick();
+                    }
                     pathingBehavior.tick(agent);
                     break;
                 case IDLE:
                 default:
+                    // 无目标时的随机游走
+                    if (agent.getRandomWalkBehavior() != null) {
+                        agent.getRandomWalkBehavior().tick();
+                    }
                     break;
             }
 

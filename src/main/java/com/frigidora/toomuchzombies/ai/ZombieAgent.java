@@ -156,6 +156,8 @@ public class ZombieAgent {
     private final com.frigidora.toomuchzombies.ai.behavior.ZombieCooperationBehavior cooperationBehavior;
     private final com.frigidora.toomuchzombies.ai.behavior.ZombieBuilderBehaviorV2 builderBehaviorV2;
     private final com.frigidora.toomuchzombies.ai.behavior.ZombieMeleeAttackBehavior meleeAttackBehavior;
+    private final com.frigidora.toomuchzombies.ai.behavior.ZombieShieldBehavior shieldBehavior;
+    private final com.frigidora.toomuchzombies.ai.behavior.ZombieRandomWalkBehavior randomWalkBehavior;
 
     public ZombieAgent(Zombie zombie, ZombieRole role) {
         this.zombie = zombie;
@@ -168,6 +170,8 @@ public class ZombieAgent {
         this.cooperationBehavior = new com.frigidora.toomuchzombies.ai.behavior.ZombieCooperationBehavior(this);
         this.builderBehaviorV2 = new com.frigidora.toomuchzombies.ai.behavior.ZombieBuilderBehaviorV2(this, this.breakerBehavior);
         this.meleeAttackBehavior = new com.frigidora.toomuchzombies.ai.behavior.ZombieMeleeAttackBehavior(this, this.builderBehaviorV2);
+        this.shieldBehavior = new com.frigidora.toomuchzombies.ai.behavior.ZombieShieldBehavior(this);
+        this.randomWalkBehavior = new com.frigidora.toomuchzombies.ai.behavior.ZombieRandomWalkBehavior(this);
     }
 
     public com.frigidora.toomuchzombies.ai.behavior.ZombieBreakerBehavior getBreakerBehavior() {
@@ -194,6 +198,18 @@ public class ZombieAgent {
         return meleeAttackBehavior;
     }
     
+    public com.frigidora.toomuchzombies.ai.behavior.ZombieShieldBehavior getShieldBehavior() {
+        return shieldBehavior;
+    }
+    
+    public com.frigidora.toomuchzombies.ai.behavior.ZombieRandomWalkBehavior getRandomWalkBehavior() {
+        return randomWalkBehavior;
+    }
+    
+    public boolean canUseShield() {
+        return true; // 默认允许使用盾牌
+    }
+    
     public boolean isWalking() {
         return isWalking;
     }
@@ -208,6 +224,10 @@ public class ZombieAgent {
     
     public void setBuilding(boolean building) {
         this.isBuilding = building;
+    }
+    
+    public boolean isFree() {
+        return zombie.getTarget() == null && !isBuilding();
     }
 
     public void recordDamage(Location sourceLocation) {
